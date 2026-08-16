@@ -22,7 +22,7 @@ echo "RUNNER_ARCH=$(uname -m)"
 echo "INSTALL_PREFIX=/userdata/system/add-ons/sunshine"
 
 echo "== Effective CMake profile =="
-grep -E '^(BUILD_DOCS|BUILD_TESTS|CMAKE_BUILD_TYPE|CMAKE_INSTALL_PREFIX|SUNSHINE_ASSETS_DIR|SUNSHINE_ENABLE_(TRAY|CUDA|VULKAN|X11|KWIN|PORTAL|WAYLAND|DRM|VAAPI)):' \
+grep -E '^(BUILD_DOCS|BUILD_TESTS|BUILD_WERROR|CMAKE_BUILD_TYPE|CMAKE_INSTALL_PREFIX|SUNSHINE_ASSETS_DIR|SUNSHINE_EXECUTABLE_PATH|SUNSHINE_ENABLE_(TRAY|CUDA|VULKAN|X11|KWIN|PORTAL|WAYLAND|DRM|VAAPI)):' \
   "${BUILD_DIR}/CMakeCache.txt" | LC_ALL=C sort
 
 echo "== Architecture =="
@@ -41,7 +41,12 @@ for elf in "${elf_files[@]}"; do
 done
 
 echo "== Sunshine version =="
-"${WRAPPER}" --version
+version_output="$("${WRAPPER}" version 2>&1)"
+printf '%s\n' "${version_output}"
+grep -Fq 'Sunshine version:' <<<"${version_output}" || {
+  echo "ERROR: Sunshine version command produced no version" >&2
+  exit 1
+}
 
 echo "== readelf -d bin/sunshine =="
 readelf -d "${SUNSHINE}"
