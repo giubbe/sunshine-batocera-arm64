@@ -1,0 +1,98 @@
+---
+name: Build Sunshine for Batocera ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sunshine-batocera-arm64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Native ARM64 build and audit
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout build harness
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Checkout exact Sunshine source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          repository: LizardByte/Sunshine
+          ref: 14ffa6fdaa53f7b51512be2b3d24f3939695403c
+          path: source
+          submodules: recursive
+
+      - name: Verify source identity and runner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(uname -m)" = aarch64
+          test "$(git -C source rev-parse HEAD)" = 14ffa6fdaa53f7b51512be2b3d24f3939695403c
+          git -C source describe --tags --exact-match HEAD
+          git -C source submodule status --recursive
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            file \
+            git \
+            libcap-dev \
+            libcurl4-openssl-dev \
+            libdrm-dev \
+            libevdev-dev \
+            libgbm-dev \
+            libgl-dev \
+            libicu-dev \
+            libminiupnpc-dev \
+            libnuma-dev \
+            libopus-dev \
+            libpulse-dev \
+            libssl-dev \
+            libsystemd-dev \
+            libudev-dev \
+            libva-dev \
+            libwayland-dev \
+            ninja-build \
+            nodejs \
+            npm \
+            patchelf \
+            pkg-config \
+            python3-jinja2 \
+            python3-setuptools \
+            systemd-dev \
+            udev
+
+      - name: Build, package, and audit
+        shell: bash
+        run: |
+          set -o pipefail
+          chmod +x ci/build-package.sh ci/audit-package.sh
+          ci/build-package.sh 2>&1 | tee build-complete.log
+          mv build-complete.log artifacts/build-complete.log
+
+      - name: Upload package, checksum, logs, and report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: sunshine-batocera-arm64-v2026.516.143833
+          path: |
+            artifacts/
+            build-complete.log
+          if-no-files-found: warn
+          retention-days: 30
