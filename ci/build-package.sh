@@ -57,7 +57,12 @@ cmake_args=(
 
 printf '%s\n' "SOURCE_TAG=${SOURCE_TAG}" "SOURCE_COMMIT=${actual_commit}"
 printf 'CMAKE_ARG=%q\n' "${cmake_args[@]}"
-cmake "${cmake_args[@]}"
+BRANCH=main \
+BUILD_VERSION="${SOURCE_TAG}" \
+CLONE_URL=https://github.com/LizardByte/Sunshine.git \
+COMMIT="${SOURCE_COMMIT}" \
+TAG="${SOURCE_TAG}" \
+  cmake "${cmake_args[@]}"
 cmake --build "${BUILD_DIR}" --parallel "$(nproc)"
 
 DESTDIR="${STAGE_DIR}/install-root" cmake --install "${BUILD_DIR}"

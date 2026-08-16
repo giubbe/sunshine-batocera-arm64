@@ -11,13 +11,15 @@ readonly BUILD_DIR="$2"
 readonly REPORT="$3"
 readonly SUNSHINE="${PACKAGE_DIR}/bin/sunshine"
 readonly WRAPPER="${PACKAGE_DIR}/bin/sunshine-start"
+readonly SOURCE_TAG="v2026.516.143833"
+readonly SOURCE_COMMIT="14ffa6fdaa53f7b51512be2b3d24f3939695403c"
 readonly FORBIDDEN_REGEX='(libgtk|libgdk|libayatana|libappindicator|libnotify|libX11|libxcb|libvulkan|libpipewire)'
 
 exec > >(tee "${REPORT}") 2>&1
 
 echo "== Build identity =="
-echo "SOURCE_TAG=v2026.516.143833"
-echo "SOURCE_COMMIT=14ffa6fdaa53f7b51512be2b3d24f3939695403c"
+echo "SOURCE_TAG=${SOURCE_TAG}"
+echo "SOURCE_COMMIT=${SOURCE_COMMIT}"
 echo "RUNNER_ARCH=$(uname -m)"
 echo "INSTALL_PREFIX=/userdata/system/add-ons/sunshine"
 
@@ -40,13 +42,17 @@ for elf in "${elf_files[@]}"; do
   }
 done
 
-echo "== Sunshine version =="
-version_output="$("${WRAPPER}" version 2>&1)"
-printf '%s\n' "${version_output}"
-grep -Fq 'Sunshine version:' <<<"${version_output}" || {
-  echo "ERROR: Sunshine version command produced no version" >&2
+echo "== Embedded Sunshine identity =="
+if ! strings "${SUNSHINE}" | grep -Fqx "${SOURCE_TAG#v}"; then
+  echo "ERROR: expected Sunshine version is not embedded in the ELF" >&2
   exit 1
-}
+fi
+if ! strings "${SUNSHINE}" | grep -Fqx "${SOURCE_COMMIT}"; then
+  echo "ERROR: expected Sunshine commit is not embedded in the ELF" >&2
+  exit 1
+fi
+echo "SUNSHINE_EMBEDDED_VERSION=${SOURCE_TAG#v}"
+echo "SUNSHINE_EMBEDDED_COMMIT=${SOURCE_COMMIT}"
 
 echo "== readelf -d bin/sunshine =="
 readelf -d "${SUNSHINE}"
