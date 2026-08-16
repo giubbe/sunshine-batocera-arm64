@@ -30,6 +30,7 @@ jobs:
           repository: LizardByte/Sunshine
           ref: 14ffa6fdaa53f7b51512be2b3d24f3939695403c
           path: source
+          fetch-tags: true
           submodules: recursive
 
       - name: Verify source identity and runner
