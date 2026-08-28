@@ -1,0 +1,193 @@
+#!/bin/bash
+
+SUNSHINE_ROOT="/userdata/system/add-ons/sunshine"
+SUNSHINE_BIN="${SUNSHINE_ROOT}/bin/sunshine"
+SUNSHINE_START="${SUNSHINE_ROOT}/bin/sunshine-start"
+SERVICE_CONFIG="/userdata/system/configs/sunshine-service.conf"
+DEFAULT_CONFIG="/userdata/system/.config/sunshine/sunshine.conf"
+CONFIG="$DEFAULT_CONFIG"
+CONSOLE_LOG="/userdata/system/.config/sunshine/service-console.log"
+PIDFILE="/var/run/sunshine-batocera.pid"
+WAYLAND_SOCKET="/var/run/wayland-0"
+RUNTIME_TIMEOUT=60
+
+export HOME="/userdata/system"
+
+if [ -r "$SERVICE_CONFIG" ]; then
+    # shellcheck disable=SC1090
+    . "$SERVICE_CONFIG"
+fi
+
+CONFIG="${SUNSHINE_CONFIG:-$CONFIG}"
+CONSOLE_LOG="${SUNSHINE_CONSOLE_LOG:-$CONSOLE_LOG}"
+RUNTIME_TIMEOUT="${SUNSHINE_RUNTIME_TIMEOUT:-$RUNTIME_TIMEOUT}"
+
+runtime_ld_library_path() {
+    printf '%s' "${SUNSHINE_ROOT}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+}
+
+is_sunshine_pid() {
+    local pid="$1"
+    local exe
+
+    [ -n "$pid" ] || return 1
+    [ -r "/proc/${pid}/exe" ] || return 1
+    exe="$(readlink "/proc/${pid}/exe" 2>/dev/null)" || return 1
+    [ "$exe" = "$SUNSHINE_BIN" ]
+}
+
+uses_config() {
+    local pid="$1"
+    [ -r "/proc/${pid}/cmdline" ] || return 1
+    tr '\0' '\n' < "/proc/${pid}/cmdline" | grep -Fqx "$CONFIG"
+}
+
+find_sunshine_pid() {
+    local p pid
+    for p in /proc/[0-9]*; do
+        pid="${p##*/}"
+        if is_sunshine_pid "$pid"; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+    done
+    return 1
+}
+
+get_managed_pid() {
+    local pid=""
+
+    if [ -r "$PIDFILE" ]; then
+        read -r pid < "$PIDFILE"
+        if is_sunshine_pid "$pid"; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+        rm -f "$PIDFILE"
+    fi
+
+    pid="$(find_sunshine_pid)" || return 1
+    if uses_config "$pid"; then
+        printf '%s\n' "$pid"
+        return 0
+    fi
+    return 1
+}
+
+runtime_dependencies_ready() {
+    local output
+    output="$(LD_LIBRARY_PATH="$(runtime_ld_library_path)" ldd "$SUNSHINE_BIN" 2>&1)"
+    ! printf '%s\n' "$output" | grep -Eq '(^|[[:space:]])not found([[:space:]]|$)|error while loading shared libraries'
+}
+
+wait_for_runtime() {
+    local waited=0
+
+    while [ "$waited" -lt "$RUNTIME_TIMEOUT" ]; do
+        if [ -S "$WAYLAND_SOCKET" ] && runtime_dependencies_ready; then
+            [ "$waited" -eq 0 ] || echo "Sunshine runtime ready after ${waited}s."
+            return 0
+        fi
+
+        if [ $((waited % 5)) -eq 0 ]; then
+            echo "Waiting for Sunshine runtime prerequisites... (${waited}/${RUNTIME_TIMEOUT}s)"
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    echo "ERROR: Sunshine runtime prerequisites not ready after ${RUNTIME_TIMEOUT}s."
+    [ -S "$WAYLAND_SOCKET" ] || echo "ERROR: Wayland socket missing: $WAYLAND_SOCKET"
+    echo "Dynamic dependency check:"
+    LD_LIBRARY_PATH="$(runtime_ld_library_path)" ldd "$SUNSHINE_BIN" 2>&1 | grep -E 'not found|libva|libicu' || true
+    return 1
+}
+
+start_service() {
+    local pid=""
+
+    [ -x "$SUNSHINE_START" ] || { echo "ERROR: Sunshine wrapper not executable: $SUNSHINE_START"; return 1; }
+    [ -x "$SUNSHINE_BIN" ] || { echo "ERROR: Sunshine binary not executable: $SUNSHINE_BIN"; return 1; }
+    [ -r "$CONFIG" ] || { echo "ERROR: Sunshine config not readable: $CONFIG"; return 1; }
+
+    pid="$(find_sunshine_pid)" || true
+    if [ -n "$pid" ]; then
+        if uses_config "$pid"; then
+            echo "$pid" > "$PIDFILE"
+            echo "Sunshine already running with configured profile (PID $pid)."
+            return 0
+        fi
+        echo "ERROR: Sunshine is already running with a different configuration (PID $pid)."
+        return 1
+    fi
+
+    wait_for_runtime || return 1
+    mkdir -p "$(dirname "$CONSOLE_LOG")"
+    echo "Starting Sunshine..."
+    cd "$(dirname "$CONFIG")" || return 1
+    "$SUNSHINE_START" "$CONFIG" >> "$CONSOLE_LOG" 2>&1 &
+    pid=$!
+    echo "$pid" > "$PIDFILE"
+    sleep 2
+
+    if is_sunshine_pid "$pid" && uses_config "$pid"; then
+        echo "Sunshine started successfully (PID $pid)."
+        return 0
+    fi
+
+    rm -f "$PIDFILE"
+    echo "ERROR: Sunshine failed to remain running."
+    echo "Last console log lines:"
+    tail -n 30 "$CONSOLE_LOG" 2>/dev/null
+    return 1
+}
+
+stop_service() {
+    local pid="" count=0
+    pid="$(get_managed_pid)" || true
+
+    if [ -z "$pid" ]; then
+        rm -f "$PIDFILE"
+        echo "Sunshine is not running."
+        return 0
+    fi
+
+    echo "Stopping Sunshine (PID $pid)..."
+    kill -TERM "$pid" || return 1
+
+    while is_sunshine_pid "$pid"; do
+        count=$((count + 1))
+        if [ "$count" -ge 15 ]; then
+            echo "ERROR: Sunshine did not stop after 15 seconds."
+            echo "Process left running; no forced kill performed."
+            return 1
+        fi
+        sleep 1
+    done
+
+    rm -f "$PIDFILE"
+    echo "Sunshine stopped cleanly."
+}
+
+status_service() {
+    local pid=""
+    pid="$(get_managed_pid)" || true
+
+    if [ -z "$pid" ]; then
+        echo "Sunshine: stopped"
+        return 3
+    fi
+
+    echo "Sunshine: running"
+    echo "PID: $pid"
+    echo "Executable: $(readlink "/proc/${pid}/exe")"
+    echo "Config: $CONFIG"
+}
+
+case "${1:-}" in
+    start) start_service ;;
+    stop) stop_service ;;
+    restart) stop_service && start_service ;;
+    status) status_service ;;
+    *) echo "Usage: $0 {start|stop|restart|status}"; exit 2 ;;
+esac
