@@ -43,9 +43,44 @@ essere soddisfatte dal target verificato. Non vengono creati symlink ABI.
 ## Limite della CI
 
 `ldd` sul runner Ubuntu descrive il runner Ubuntu, non Batocera. Gli audit CI
-verificano architettura, `DT_NEEDED`, blacklist e bundle, ma la compatibilita'
-finale deve essere provata eseguendo l'artefatto sul Raspberry Pi 5 con
-Batocera 43apu.1. Fino a tale prova non va dichiarato il successo runtime.
+verificano architettura, `DT_NEEDED`, blacklist e bundle; la compatibilita'
+finale deve essere provata separatamente sul target reale.
+
+## Validazione runtime
+
+La build e' stata validata su **Raspberry Pi 5** con **Batocera 43apu.1**.
+L'artefatto installato sul target corrisponde alla build GitHub Actions di
+Sunshine `v2026.516.143833` / commit
+`14ffa6fdaa53f7b51512be2b3d24f3939695403c`.
+
+Verifiche eseguite sul target:
+
+- `sunshine --version` riporta versione e commit attesi;
+- SHA256 del binario installato:
+  `b7cd913b356c0a34b3c440d53a8cc922c7d32b4b4583e3e3fbb79379fbe35335`;
+- lo SHA256 coincide byte-per-byte con il binario estratto dall'artefatto CI;
+- il file installato risulta creato sul target il 17 agosto 2026 alle
+  19:07:17 +0200;
+- una successiva sessione di streaming della stessa serata e' rimasta attiva
+  per circa tre ore senza crash osservati.
+
+La correlazione dell'endurance test con questo specifico binario e' supportata
+dal timestamp di installazione precedente al test e dallo SHA256 tuttora
+identico all'artefatto CI. Il log di processo originale della sessione non e'
+stato conservato, quindi questo punto e' documentato come ricostruzione
+storica forte, non come tracciamento forense completo del processo.
+
+### Warning noto sul target
+
+Sul sistema validato il loader emette:
+
+```text
+/usr/lib/libcurl.so.4: no version information available
+```
+
+Il warning non ha impedito l'avvio di Sunshine ne' lo streaming nel test sopra
+descritto. Resta comunque una differenza ABI/symbol-versioning del target da
+considerare se il pacchetto viene usato su revisioni Batocera differenti.
 
 ## Rollback
 
