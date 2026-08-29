@@ -1,7 +1,7 @@
 diff --git a/src/platform/linux/audio.cpp b/src/platform/linux/audio.cpp
 --- a/src/platform/linux/audio.cpp
 +++ b/src/platform/linux/audio.cpp
-@@ -61,7 +61,7 @@ namespace platf {
+@@ -61,4 +61,4 @@ namespace platf {
 -  std::unique_ptr<mic_t> microphone(const std::uint8_t *mapping, int channels, std::uint32_t sample_rate, std::uint32_t frame_size, std::string source_name) {
 +  std::unique_ptr<mic_t> microphone(const std::uint8_t *mapping, int channels, std::uint32_t sample_rate, [[maybe_unused]] std::uint32_t frame_size, std::string source_name) {
      auto mic = std::make_unique<mic_attr_t>();
