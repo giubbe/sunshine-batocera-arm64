@@ -118,15 +118,32 @@ exec "${SUNSHINE_ROOT}/bin/sunshine" "$@"
 WRAPPER
 chmod 0755 "${PACKAGE_DIR}/bin/sunshine-start"
 
+# Ship the Batocera user-service template inside the add-on and an installer
+# that copies it to /userdata/system/services/sunshine. The service waits for
+# Wayland and dynamic dependencies before starting Sunshine, avoiding the
+# boot race observed with Batocera's parallel S99userservices launcher.
+install -Dm0755 \
+  "${REPO_ROOT}/batocera/sunshine" \
+  "${PACKAGE_DIR}/share/batocera/sunshine"
+install -Dm0755 \
+  "${REPO_ROOT}/batocera/install-service.sh" \
+  "${PACKAGE_DIR}/bin/install-batocera-service"
+
 cat > "${PACKAGE_DIR}/README.txt" <<EOF
 Sunshine ${SOURCE_TAG} for Batocera 43apu.1 / Raspberry Pi 5 aarch64
 Source commit: ${SOURCE_COMMIT}
 Install path: ${INSTALL_PREFIX}
-Start command: ${INSTALL_PREFIX}/bin/sunshine-start
+Manual start: ${INSTALL_PREFIX}/bin/sunshine-start
+Install Batocera service: ${INSTALL_PREFIX}/bin/install-batocera-service
 
-No Batocera service is included. Extract only below /userdata.
-The wrapper selects Wayland wayland-0 and the local library directory.
-Ubuntu CI ldd results are not equivalent to runtime validation on Batocera.
+The packaged Batocera user service waits for Wayland and for all dynamic
+Sunshine dependencies to resolve before starting. It defaults to
+/userdata/system/.config/sunshine/sunshine.conf and can be overridden through
+/userdata/system/configs/sunshine-service.conf.
+
+Only the ICU 74 closure required by Sunshine is bundled. Other dynamic
+libraries must be provided by the Batocera target. Ubuntu CI ldd results are
+not equivalent to runtime validation on Batocera.
 EOF
 
 (
