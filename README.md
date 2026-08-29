@@ -1,5 +1,13 @@
 # Sunshine ARM64 per Batocera 43 / Raspberry Pi 5
 
+> [!WARNING]
+> **Progetto in corso di sviluppo.** Questo repository viene sviluppato e testato
+> iterativamente con l'assistenza di **ChatGPT**. Non e' ancora da considerare
+> completo o definitivamente stabile: branch, patch e build sperimentali possono
+> essere temporanei, non validati sul target reale o destinati a essere scartati.
+> Prima di usare un artifact, verificare sempre la relativa sezione di validazione
+> e distinguere le build validate dagli esperimenti in corso.
+
 Questo repository e' un harness di build: non modifica Batocera e compila i
 sorgenti ufficiali Sunshine in un checkout separato, fissato a:
 
