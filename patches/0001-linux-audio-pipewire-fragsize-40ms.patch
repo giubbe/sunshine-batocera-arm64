@@ -1,0 +1,13 @@
+diff --git a/src/platform/linux/audio.cpp b/src/platform/linux/audio.cpp
+index 9d1edb9..d915f2b 100644
+--- a/src/platform/linux/audio.cpp
++++ b/src/platform/linux/audio.cpp
+@@ -76,7 +76,7 @@ namespace platf {
+       .tlength = uint32_t(-1),
+       .prebuf = uint32_t(-1),
+       .minreq = uint32_t(-1),
+-      .fragsize = uint32_t(frame_size * channels * sizeof(float))
++      .fragsize = uint32_t(frame_size * 8 * channels * sizeof(float))
+     };
+ 
+     pa_sample_spec sample_spec = {
