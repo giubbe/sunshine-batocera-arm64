@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - audio-pipewire-fragsize-20ms
   pull_request:
     branches:
       - main
@@ -44,6 +45,18 @@ jobs:
           test "$(git -C source rev-parse HEAD)" = 14ffa6fdaa53f7b51512be2b3d24f3939695403c
           git -C source describe --tags --exact-match HEAD
           git -C source submodule status --recursive
+
+      - name: Apply experimental 20 ms PipeWire capture patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git -C source apply --check ../patches/0001-linux-audio-pipewire-fragsize-20ms.patch
+          git -C source apply ../patches/0001-linux-audio-pipewire-fragsize-20ms.patch
+          grep -nF '.fragsize = uint32_t(frame_size * 4 * channels * sizeof(float))' source/src/platform/linux/audio.cpp
+          if grep -nF '.fragsize = uint32_t(frame_size * channels * sizeof(float))' source/src/platform/linux/audio.cpp; then
+            echo 'ERROR: original 5 ms capture fragsize still present after patch' >&2
+            exit 1
+          fi
 
       - name: Install build dependencies
         shell: bash
@@ -94,7 +107,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: sunshine-batocera-arm64-v2026.516.143833
+          name: sunshine-batocera-arm64-v2026.516.143833-audio-fragsize-20ms
           path: |
             artifacts/
             build-complete.log
