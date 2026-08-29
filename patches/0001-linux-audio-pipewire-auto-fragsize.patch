@@ -1,0 +1,18 @@
+diff --git a/src/platform/linux/audio.cpp b/src/platform/linux/audio.cpp
+--- a/src/platform/linux/audio.cpp
++++ b/src/platform/linux/audio.cpp
+@@ -61,7 +61,7 @@ namespace platf {
+-  std::unique_ptr<mic_t> microphone(const std::uint8_t *mapping, int channels, std::uint32_t sample_rate, std::uint32_t frame_size, std::string source_name) {
++  std::unique_ptr<mic_t> microphone(const std::uint8_t *mapping, int channels, std::uint32_t sample_rate, [[maybe_unused]] std::uint32_t frame_size, std::string source_name) {
+     auto mic = std::make_unique<mic_attr_t>();
+ 
+     pa_sample_spec ss {PA_SAMPLE_FLOAT32, sample_rate, (std::uint8_t) channels};
+@@ -76,7 +76,7 @@ namespace platf {
+       .tlength = uint32_t(-1),
+       .prebuf = uint32_t(-1),
+       .minreq = uint32_t(-1),
+-      .fragsize = uint32_t(frame_size * channels * sizeof(float))
++      .fragsize = uint32_t(-1)
+     };
+ 
+     int status;
