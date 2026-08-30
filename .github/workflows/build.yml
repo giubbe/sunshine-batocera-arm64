@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - audio-pipewire-pa-stream
+      - audio-pcm-pre-opus-dump
   pull_request:
     branches:
       - main
@@ -59,6 +60,15 @@ jobs:
             exit 1
           fi
 
+      - name: Apply pre-Opus PCM diagnostic patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git -C source apply --check ../patches/0002-audio-dump-pre-opus-pcm.patch
+          git -C source apply ../patches/0002-audio-dump-pre-opus-pcm.patch
+          grep -nF '/dev/shm/sunshine-pre-opus.f32' source/src/audio.cpp
+          grep -nF 'opus_multistream_encode_float' source/src/audio.cpp
+
       - name: Install build dependencies
         shell: bash
         run: |
@@ -108,7 +118,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: sunshine-batocera-arm64-v2026.516.143833-audio-pa-stream
+          name: sunshine-batocera-arm64-v2026.516.143833-pre-opus-dump
           path: |
             artifacts/
             build-complete.log
