@@ -13,7 +13,7 @@ index da5a221e..89f6505b 100644
  
  // lib includes
  #include <opus/opus_multistream.h>
-@@ -106,9 +109,38 @@ namespace audio {
+@@ -106,9 +109,45 @@ namespace audio {
                      << stream.bitrate / 1000 << " kbps (total), LOWDELAY"sv;
  
      auto frame_size = config.packetDuration * stream.sampleRate / 1000;
@@ -21,11 +21,18 @@ index da5a221e..89f6505b 100644
 +    // Diagnostic build: capture exactly what the Opus encoder receives.
 +    // /dev/shm avoids persistent-storage I/O while streaming. Limit the dump
 +    // to 60 seconds so a forgotten diagnostic session cannot fill tmpfs.
++    struct file_closer_t {
++      void operator()(std::FILE *file) const noexcept {
++        if (file != nullptr) {
++          std::fclose(file);
++        }
++      }
++    };
++
 +    constexpr std::size_t PCM_DUMP_MAX_FRAMES = SAMPLE_RATE * 60ULL;
 +    std::size_t pcm_dump_frames = 0;
-+    auto pcm_dump = std::unique_ptr<std::FILE, decltype(&std::fclose)> {
-+      std::fopen("/dev/shm/sunshine-pre-opus.f32", "wb"),
-+      &std::fclose
++    auto pcm_dump = std::unique_ptr<std::FILE, file_closer_t> {
++      std::fopen("/dev/shm/sunshine-pre-opus.f32", "wb")
 +    };
 +    if (pcm_dump) {
 +      BOOST_LOG(info) << "Diagnostic pre-Opus PCM dump enabled: /dev/shm/sunshine-pre-opus.f32 (max 60 s, float32 native-endian)"sv;
