@@ -70,31 +70,32 @@ Sunshine sul percorso DRM/KMS disponibile in questa build.
 ### Giochi o emulatori troppo pesanti
 
 Se un gioco o un emulatore presenta audio che gracchia, rallentamenti o video
-irregolare **non e' necessario abbassare la risoluzione dell'intera interfaccia
-Batocera**. Il test che ha risolto il caso Dreamcast consiste nel lasciare
-EmulationStation/Batocera a `1920x1080` e impostare **solo quel gioco o
-emulatore** a una risoluzione inferiore, ad esempio `1280x720`.
+irregolare, ridurre la **risoluzione reale del solo gioco/emulatore** resta una
+regolazione utile da provare prima di abbassare l'intera interfaccia Batocera.
+Nei test Dreamcast/Flycast, portare il gioco da 1080p a 720p ha inizialmente
+eliminato il disturbo mantenendo EmulationStation/Batocera a 1080p.
 
-Sul Raspberry Pi 5 testato la combinazione seguente funziona correttamente:
+Il comportamento pero' **non e' risultato stabile dopo reboot**: con configurazione
+ancora verificata come `capture = kms`, `encoder = software` e gioco realmente a
+`1280x720`, il gracchiare e' ricomparso. Per questo motivo la riduzione per-gioco
+va considerata al momento un **workaround sperimentale**, non una soluzione
+validata o garantita.
+
+Il test resta comunque diagnostico e potenzialmente utile: chiedere soltanto a
+Moonlight una risoluzione piu' bassa non riduce necessariamente la risoluzione
+del framebuffer sorgente catturato da Sunshine; impostare invece il gioco o
+l'emulatore a una risoluzione inferiore riduce realmente il framebuffer prodotto
+dal target.
+
+Configurazione attualmente consigliata per continuare i test:
 
 ```text
-Batocera / EmulationStation: 1920x1080
-Dreamcast / Flycast:         1280x720 @ 60 Hz
+Batocera / EmulationStation: risoluzione preferita (es. 1920x1080)
+Gioco / emulatore critico:   provare 1280x720 o inferiore
 Sunshine capture:            KMS
-Moonlight:                   1280x720 @ 60 fps
-audio:                       attivo
+Sunshine encoder:            software
+Audio:                       attivo
 ```
-
-Il punto importante e' la **risoluzione reale del framebuffer del gioco**. Nei
-test, chiedere semplicemente a Moonlight una risoluzione piu' bassa mentre il
-gioco continuava a renderizzare a 1080p non bastava: Sunshine continuava a
-catturare il framebuffer sorgente 1920x1080. Portando invece il solo gioco a
-720p, audio e video sono tornati regolari senza rinunciare al desktop Batocera
-1080p.
-
-Questa e' quindi la prima regolazione da provare per i titoli che mettono in
-crisi lo streaming: **ridurre la risoluzione del solo gioco/emulatore che ne ha
-bisogno**, mantenendo il resto del sistema alla risoluzione preferita.
 
 ## Build e artifact
 
@@ -201,8 +202,9 @@ Verifiche eseguite sul target durante lo sviluppo:
 - confronto Wayland/KMS;
 - test con Dreamcast/Flycast a 1080p e 720p;
 - verifica di assenza di throttling (`throttled=0x0`) durante il caso critico;
-- prova operativa finale con Batocera 1080p e gioco Dreamcast 720p60, con audio
-  e video regolari durante lo streaming.
+- miglioramento iniziale osservato impostando il gioco Dreamcast a 720p, seguito
+  pero' dalla ricomparsa del gracchiare dopo reboot a parita' di risoluzione e
+  backend KMS; la causa residua e' quindi ancora in indagine.
 
 La build finale prodotta dopo modifiche al repository deve comunque superare la
 CI ed essere nuovamente verificata sul target prima di considerare estesa a
