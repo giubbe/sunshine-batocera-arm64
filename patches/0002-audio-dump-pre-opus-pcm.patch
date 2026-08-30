@@ -2,17 +2,18 @@ diff --git a/src/audio.cpp b/src/audio.cpp
 index da5a221e..89f6505b 100644
 --- a/src/audio.cpp
 +++ b/src/audio.cpp
-@@ -3,7 +3,9 @@
+@@ -3,7 +3,10 @@
   * @brief Definitions for audio capture and encoding.
   */
  // standard includes
++#include <algorithm>
 +#include <cstdio>
 +#include <memory>
  #include <thread>
  
  // lib includes
  #include <opus/opus_multistream.h>
-@@ -106,9 +108,35 @@ namespace audio {
+@@ -106,9 +109,38 @@ namespace audio {
                      << stream.bitrate / 1000 << " kbps (total), LOWDELAY"sv;
  
      auto frame_size = config.packetDuration * stream.sampleRate / 1000;
