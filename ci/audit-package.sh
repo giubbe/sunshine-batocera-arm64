@@ -81,6 +81,18 @@ if readelf -d "${SUNSHINE}" | grep -Eiq "${FORBIDDEN_REGEX}"; then
   exit 1
 fi
 
+# The Batocera patch deliberately uses the asynchronous libpulse API instead
+# of libpulse-simple. Keep this property explicit so a future source/build
+# change cannot silently restore the synchronous capture dependency.
+if ! readelf -d "${SUNSHINE}" | grep -Fq '[libpulse.so.0]'; then
+  echo "ERROR: expected libpulse.so.0 dependency not found" >&2
+  exit 1
+fi
+if readelf -d "${SUNSHINE}" | grep -Fq '[libpulse-simple.so.0]'; then
+  echo "ERROR: unexpected libpulse-simple.so.0 dependency found" >&2
+  exit 1
+fi
+
 echo "== Bundled runtime libraries =="
 find "${PACKAGE_DIR}/lib" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort
 if find "${PACKAGE_DIR}/lib" -maxdepth 1 -type f -printf '%f\n' \

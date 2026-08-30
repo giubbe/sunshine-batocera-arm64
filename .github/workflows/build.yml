@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - final-kms-audio-tuning
   pull_request:
     branches:
       - main
@@ -44,6 +45,19 @@ jobs:
           test "$(git -C source rev-parse HEAD)" = 14ffa6fdaa53f7b51512be2b3d24f3939695403c
           git -C source describe --tags --exact-match HEAD
           git -C source submodule status --recursive
+
+      - name: Apply Batocera audio capture patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git -C source apply --check ../patches/0001-linux-audio-pa-stream-callback.patch
+          git -C source apply ../patches/0001-linux-audio-pa-stream-callback.patch
+          grep -nF 'pa_stream_connect_record(mic->stream.get()' source/src/platform/linux/audio.cpp
+          grep -nF 'pa_stream_set_read_callback(mic->stream.get()' source/src/platform/linux/audio.cpp
+          if grep -nF 'pa_simple_read(mic.get()' source/src/platform/linux/audio.cpp; then
+            echo 'ERROR: pa_simple_read capture path still present after patch' >&2
+            exit 1
+          fi
 
       - name: Install build dependencies
         shell: bash

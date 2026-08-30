@@ -1,0 +1,226 @@
+diff --git a/src/platform/linux/audio.cpp b/src/platform/linux/audio.cpp
+--- a/src/platform/linux/audio.cpp
++++ b/src/platform/linux/audio.cpp
+@@ -4,6 +4,9 @@
+  */
+ // standard includes
+ #include <bitset>
++#include <condition_variable>
++#include <deque>
++#include <mutex>
+ #include <sstream>
+ #include <thread>
+ 
+@@ -12,6 +15,7 @@
+ #include <pulse/error.h>
+ #include <pulse/pulseaudio.h>
+ #include <pulse/simple.h>
++#include <pulse/thread-mainloop.h>
+ 
+ // local includes
+ #include "src/config.h"
+@@ -51,18 +55,109 @@
+   }
+ 
+   struct mic_attr_t: public mic_t {
+-    util::safe_ptr<pa_simple, pa_simple_free> mic;
++    util::safe_ptr<pa_threaded_mainloop, pa_threaded_mainloop_free> mainloop;
++    util::safe_ptr<pa_context, pa_context_unref> context;
++    util::safe_ptr<pa_stream, pa_stream_unref> stream;
++    std::mutex queue_mutex;
++    std::condition_variable queue_cv;
++    std::deque<float> queue;
++    bool failed = false;
++    bool mainloop_started = false;
++
++    ~mic_attr_t() override {
++      if (mainloop_started) {
++        pa_threaded_mainloop_stop(mainloop.get());
++      }
++      if (stream) {
++        pa_stream_disconnect(stream.get());
++      }
++      if (context) {
++        pa_context_disconnect(context.get());
++      }
++    }
++
++    void fail() {
++      {
++        std::lock_guard lock {queue_mutex};
++        failed = true;
++      }
++      queue_cv.notify_all();
++    }
++
++    static void context_state_cb(pa_context *ctx, void *userdata) {
++      auto *self = static_cast<mic_attr_t *>(userdata);
++      const auto state = pa_context_get_state(ctx);
++      if (state == PA_CONTEXT_READY || state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED) {
++        pa_threaded_mainloop_signal(self->mainloop.get(), 0);
++      }
++      if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED) {
++        self->fail();
++      }
++    }
++
++    static void stream_state_cb(pa_stream *stream, void *userdata) {
++      auto *self = static_cast<mic_attr_t *>(userdata);
++      const auto state = pa_stream_get_state(stream);
++      if (state == PA_STREAM_READY || state == PA_STREAM_FAILED || state == PA_STREAM_TERMINATED) {
++        pa_threaded_mainloop_signal(self->mainloop.get(), 0);
++      }
++      if (state == PA_STREAM_FAILED || state == PA_STREAM_TERMINATED) {
++        self->fail();
++      }
++    }
++
++    static void stream_read_cb(pa_stream *stream, size_t, void *userdata) {
++      auto *self = static_cast<mic_attr_t *>(userdata);
++      bool appended = false;
++
++      while (pa_stream_readable_size(stream) > 0) {
++        const void *data = nullptr;
++        size_t length = 0;
++        if (pa_stream_peek(stream, &data, &length) < 0) {
++          self->fail();
++          return;
++        }
++
++        if (length == 0) {
++          break;
++        }
++
++        {
++          std::lock_guard lock {self->queue_mutex};
++          const auto samples = length / sizeof(float);
++          if (data) {
++            const auto *first = static_cast<const float *>(data);
++            self->queue.insert(self->queue.end(), first, first + samples);
++          } else {
++            self->queue.insert(self->queue.end(), samples, 0.0f);
++          }
++        }
++        appended = true;
++
++        if (pa_stream_drop(stream) < 0) {
++          self->fail();
++          return;
++        }
++      }
++
++      if (appended) {
++        self->queue_cv.notify_one();
++      }
++    }
+ 
+     capture_e sample(std::vector<float> &sample_buf) override {
+-      auto sample_size = sample_buf.size();
+-
+-      auto buf = sample_buf.data();
+-      int status;
+-      if (pa_simple_read(mic.get(), buf, sample_size * sizeof(float), &status)) {
+-        BOOST_LOG(error) << "pa_simple_read() failed: "sv << pa_strerror(status);
+-
++      std::unique_lock lock {queue_mutex};
++      queue_cv.wait(lock, [this, needed = sample_buf.size()]() {
++        return failed || queue.size() >= needed;
++      });
++
++      if (failed && queue.size() < sample_buf.size()) {
++        BOOST_LOG(error) << "PulseAudio pa_stream capture failed"sv;
+         return capture_e::error;
+       }
++
++      std::copy_n(queue.begin(), sample_buf.size(), sample_buf.begin());
++      queue.erase(queue.begin(), queue.begin() + static_cast<std::ptrdiff_t>(sample_buf.size()));
+ 
+       return capture_e::ok;
+     }
+@@ -78,6 +173,51 @@
+     std::for_each_n(pa_map.map, pa_map.channels, [mapping](auto &channel) mutable {
+       channel = position_mapping[*mapping++];
+     });
++
++    mic->mainloop.reset(pa_threaded_mainloop_new());
++    if (!mic->mainloop) {
++      BOOST_LOG(error) << "pa_threaded_mainloop_new() failed"sv;
++      return nullptr;
++    }
++
++    mic->context.reset(pa_context_new(pa_threaded_mainloop_get_api(mic->mainloop.get()), "sunshine"));
++    if (!mic->context) {
++      BOOST_LOG(error) << "pa_context_new() failed"sv;
++      return nullptr;
++    }
++    pa_context_set_state_callback(mic->context.get(), mic_attr_t::context_state_cb, mic.get());
++
++    if (pa_context_connect(mic->context.get(), nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0) {
++      BOOST_LOG(error) << "pa_context_connect() failed: "sv << pa_strerror(pa_context_errno(mic->context.get()));
++      return nullptr;
++    }
++
++    pa_threaded_mainloop_lock(mic->mainloop.get());
++    if (pa_threaded_mainloop_start(mic->mainloop.get()) < 0) {
++      pa_threaded_mainloop_unlock(mic->mainloop.get());
++      BOOST_LOG(error) << "pa_threaded_mainloop_start() failed"sv;
++      return nullptr;
++    }
++    mic->mainloop_started = true;
++
++    while (pa_context_get_state(mic->context.get()) != PA_CONTEXT_READY) {
++      if (!PA_CONTEXT_IS_GOOD(pa_context_get_state(mic->context.get()))) {
++        pa_threaded_mainloop_unlock(mic->mainloop.get());
++        BOOST_LOG(error) << "PulseAudio context failed while connecting"sv;
++        return nullptr;
++      }
++      pa_threaded_mainloop_wait(mic->mainloop.get());
++    }
++
++    mic->stream.reset(pa_stream_new(mic->context.get(), "sunshine-record", &ss, &pa_map));
++    if (!mic->stream) {
++      pa_threaded_mainloop_unlock(mic->mainloop.get());
++      BOOST_LOG(error) << "pa_stream_new() failed: "sv << pa_strerror(pa_context_errno(mic->context.get()));
++      return nullptr;
++    }
++
++    pa_stream_set_state_callback(mic->stream.get(), mic_attr_t::stream_state_cb, mic.get());
++    pa_stream_set_read_callback(mic->stream.get(), mic_attr_t::stream_read_cb, mic.get());
+ 
+     pa_buffer_attr pa_attr = {
+       .maxlength = uint32_t(-1),
+@@ -87,17 +227,23 @@
+       .fragsize = uint32_t(frame_size * channels * sizeof(float))
+     };
+ 
+-    int status;
+-
+-    mic->mic.reset(
+-      pa_simple_new(nullptr, "sunshine", pa_stream_direction_t::PA_STREAM_RECORD, source_name.c_str(), "sunshine-record", &ss, &pa_map, &pa_attr, &status)
+-    );
+-
+-    if (!mic->mic) {
+-      auto err_str = pa_strerror(status);
+-      BOOST_LOG(error) << "pa_simple_new() failed: "sv << err_str;
+-      return nullptr;
+-    }
++    const auto flags = static_cast<pa_stream_flags_t>(PA_STREAM_INTERPOLATE_TIMING | PA_STREAM_ADJUST_LATENCY | PA_STREAM_AUTO_TIMING_UPDATE);
++    if (pa_stream_connect_record(mic->stream.get(), source_name.c_str(), &pa_attr, flags) < 0) {
++      pa_threaded_mainloop_unlock(mic->mainloop.get());
++      BOOST_LOG(error) << "pa_stream_connect_record() failed: "sv << pa_strerror(pa_context_errno(mic->context.get()));
++      return nullptr;
++    }
++
++    while (pa_stream_get_state(mic->stream.get()) != PA_STREAM_READY) {
++      if (!PA_STREAM_IS_GOOD(pa_stream_get_state(mic->stream.get()))) {
++        pa_threaded_mainloop_unlock(mic->mainloop.get());
++        BOOST_LOG(error) << "PulseAudio stream failed while connecting"sv;
++        return nullptr;
++      }
++      pa_threaded_mainloop_wait(mic->mainloop.get());
++    }
++
++    pa_threaded_mainloop_unlock(mic->mainloop.get());
+ 
+     return mic;
+   }
