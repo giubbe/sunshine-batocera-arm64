@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - main
-      - audio-pipewire-pa-stream
+      - final-kms-audio-tuning
   pull_request:
     branches:
       - main
@@ -46,7 +46,7 @@ jobs:
           git -C source describe --tags --exact-match HEAD
           git -C source submodule status --recursive
 
-      - name: Apply experimental pa_stream capture patch
+      - name: Apply Batocera audio capture patch
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -108,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: sunshine-batocera-arm64-v2026.516.143833-audio-pa-stream
+          name: sunshine-batocera-arm64-v2026.516.143833
           path: |
             artifacts/
             build-complete.log
