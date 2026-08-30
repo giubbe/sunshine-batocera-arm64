@@ -1,0 +1,53 @@
+diff --git a/src/audio.cpp b/src/audio.cpp
+index da5a221e..89f6505b 100644
+--- a/src/audio.cpp
++++ b/src/audio.cpp
+@@ -3,7 +3,9 @@
+  * @brief Definitions for audio capture and encoding.
+  */
+ // standard includes
++#include <cstdio>
++#include <memory>
+ #include <thread>
+ 
+ // lib includes
+ #include <opus/opus_multistream.h>
+@@ -106,9 +108,35 @@ namespace audio {
+                     << stream.bitrate / 1000 << " kbps (total), LOWDELAY"sv;
+ 
+     auto frame_size = config.packetDuration * stream.sampleRate / 1000;
++
++    // Diagnostic build: capture exactly what the Opus encoder receives.
++    // /dev/shm avoids persistent-storage I/O while streaming. Limit the dump
++    // to 60 seconds so a forgotten diagnostic session cannot fill tmpfs.
++    constexpr std::size_t PCM_DUMP_MAX_FRAMES = SAMPLE_RATE * 60ULL;
++    std::size_t pcm_dump_frames = 0;
++    auto pcm_dump = std::unique_ptr<std::FILE, decltype(&std::fclose)> {
++      std::fopen("/dev/shm/sunshine-pre-opus.f32", "wb"),
++      &std::fclose
++    };
++    if (pcm_dump) {
++      BOOST_LOG(info) << "Diagnostic pre-Opus PCM dump enabled: /dev/shm/sunshine-pre-opus.f32 (max 60 s, float32 native-endian)"sv;
++    } else {
++      BOOST_LOG(warning) << "Unable to open /dev/shm/sunshine-pre-opus.f32 for diagnostic PCM dump"sv;
++    }
++
+     while (auto sample = samples->pop()) {
+       buffer_t packet {1400};
+ 
++      if (pcm_dump && pcm_dump_frames < PCM_DUMP_MAX_FRAMES) {
++        const auto frames_left = PCM_DUMP_MAX_FRAMES - pcm_dump_frames;
++        const auto frames_to_write = std::min<std::size_t>(frame_size, frames_left);
++        const auto samples_to_write = frames_to_write * stream.channelCount;
++        const auto written = std::fwrite(sample->data(), sizeof(float), samples_to_write, pcm_dump.get());
++        if (written != samples_to_write) {
++          BOOST_LOG(error) << "Diagnostic pre-Opus PCM dump write failed"sv;
++          pcm_dump.reset();
++        } else {
++          pcm_dump_frames += frames_to_write;
++        }
++      }
++
+       int bytes = opus_multistream_encode_float(opus.get(), sample->data(), frame_size, std::begin(packet), (opus_int32) packet.size());
+       if (bytes < 0) {
+         BOOST_LOG(error) << "Couldn't encode audio: "sv << opus_strerror(bytes);
