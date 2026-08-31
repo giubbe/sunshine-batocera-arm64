@@ -1,0 +1,61 @@
+name: Build EGL readback benchmark ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/egl-readback-bench.cpp'
+      - '.github/workflows/egl-readback-bench-arm64.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ pkg-config libegl1-mesa-dev libgl-dev
+
+      - name: Build
+        run: |
+          mkdir -p build artifact
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic \
+            tools/egl-readback-bench.cpp \
+            -o build/egl-readback-bench \
+            $(pkg-config --cflags --libs egl gl)
+
+      - name: Inspect binary
+        run: |
+          file build/egl-readback-bench
+          readelf -h build/egl-readback-bench | grep -E 'Class:|Machine:'
+          ldd build/egl-readback-bench || true
+
+      - name: Package
+        run: |
+          cp build/egl-readback-bench artifact/
+          cat > artifact/BUILDINFO <<'EOF'
+          egl-readback-bench
+          Target: ARM64 Linux / Batocera Raspberry Pi 5
+          Purpose: compare OpenGL 1920x1080 BGRA32/RGBA32/RGB24/BGR24 texture readback.
+          Warm-up: 20 reads per format
+          Timed runs: 300 per format
+          EOF
+          (
+            cd artifact
+            sha256sum egl-readback-bench > SHA256SUMS
+          )
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: egl-readback-bench-batocera-arm64
+          path: artifact/
+          retention-days: 7
+          if-no-files-found: error
