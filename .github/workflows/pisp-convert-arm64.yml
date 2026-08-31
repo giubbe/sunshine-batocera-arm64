@@ -29,6 +29,100 @@ jobs:
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9"
 
+      - name: Add multi-frame benchmark mode
+        working-directory: libpisp
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/examples/convert.cpp")
+          s = p.read_text()
+
+          old = '#include <assert.h>\n#include <fstream>'
+          new = '#include <assert.h>\n#include <chrono>\n#include <fstream>'
+          if old not in s:
+              raise SystemExit("include insertion point not found")
+          s = s.replace(old, new, 1)
+
+          old = '''\t\t("output-format", "Output format in the form width:height:stride:format\\n"
+          \t\t\t\t\t\t  "Bit-depth is assumed to be 8-bit.", cxxopts::value<std::string>()->default_value(""))
+          \t\t("f,formats", "List available format strings that can be used")'''
+          new = '''\t\t("output-format", "Output format in the form width:height:stride:format\\n"
+          \t\t\t\t\t\t  "Bit-depth is assumed to be 8-bit.", cxxopts::value<std::string>()->default_value(""))
+          \t\t("benchmark", "Run the configured PiSP job N timed times after 10 warm-up runs",
+          \t\t\t cxxopts::value<unsigned int>()->default_value("1"))
+          \t\t("f,formats", "List available format strings that can be used")'''
+          if old not in s:
+              raise SystemExit("option insertion point not found")
+          s = s.replace(old, new, 1)
+
+          old = '''\tint ret = backend_device.Run(buffers);
+          \tif (ret)
+          \t{
+          \t\tstd::cerr << "Job run error!" << std::endl;
+          \t\texit(-1);
+          \t}'''
+          new = '''\tconst unsigned int benchmark_runs = args["benchmark"].as<unsigned int>();
+          \tif (!benchmark_runs)
+          \t{
+          \t\tstd::cerr << "--benchmark must be >= 1" << std::endl;
+          \t\texit(-1);
+          \t}
+
+          \tint ret = 0;
+          \tif (benchmark_runs > 1)
+          \t{
+          \t\tconstexpr unsigned int warmup_runs = 10;
+          \t\tfor (unsigned int n = 0; n < warmup_runs; ++n)
+          \t\t{
+          \t\t\tret = backend_device.Run(buffers);
+          \t\t\tif (ret)
+          \t\t\t{
+          \t\t\t\tstd::cerr << "Warm-up job run error at iteration " << n << std::endl;
+          \t\t\t\texit(-1);
+          \t\t\t}
+          \t\t}
+
+          \t\tconst auto start = std::chrono::steady_clock::now();
+          \t\tfor (unsigned int n = 0; n < benchmark_runs; ++n)
+          \t\t{
+          \t\t\tret = backend_device.Run(buffers);
+          \t\t\tif (ret)
+          \t\t\t{
+          \t\t\t\tstd::cerr << "Benchmark job run error at iteration " << n << std::endl;
+          \t\t\t\texit(-1);
+          \t\t\t}
+          \t\t}
+          \t\tconst auto stop = std::chrono::steady_clock::now();
+          \t\tconst double total_ms = std::chrono::duration<double, std::milli>(stop - start).count();
+          \t\tconst double average_ms = total_ms / benchmark_runs;
+          \t\tconst double fps = 1000.0 / average_ms;
+          \t\tstd::cerr << "PiSP benchmark: runs=" << benchmark_runs
+          \t\t\t\t  << " warmup=" << warmup_runs
+          \t\t\t\t  << " total_ms=" << total_ms
+          \t\t\t\t  << " avg_ms=" << average_ms
+          \t\t\t\t  << " fps=" << fps << std::endl;
+          \t}
+          \telse
+          \t{
+          \t\tret = backend_device.Run(buffers);
+          \t\tif (ret)
+          \t\t{
+          \t\t\tstd::cerr << "Job run error!" << std::endl;
+          \t\t\texit(-1);
+          \t\t}
+          \t}'''
+          if old not in s:
+              raise SystemExit("Run() replacement point not found")
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+          grep -F 'cxxopts::value<unsigned int>()->default_value("1")' src/examples/convert.cpp
+          grep -F 'PiSP benchmark: runs=' src/examples/convert.cpp
+          grep -F 'constexpr unsigned int warmup_runs = 10;' src/examples/convert.cpp
+
       - name: Configure
         working-directory: libpisp
         run: |
@@ -50,11 +144,13 @@ jobs:
           file build/src/examples/convert
           ldd build/src/examples/convert || true
           readelf -h build/src/examples/convert | grep -E 'Class:|Machine:'
+          build/src/examples/convert --help | grep -F -- '--benchmark'
 
       - name: Package
         run: |
-          mkdir -p artifact
+          mkdir -p artifact/share/libpisp
           cp libpisp/build/src/examples/convert artifact/pisp_convert
+          cp libpisp/src/libpisp/backend/backend_default_config.json artifact/share/libpisp/backend_default_config.json
           chmod 0755 artifact/pisp_convert
           cat > artifact/BUILDINFO.txt <<'EOF'
           libpisp_version=1.7.0
@@ -64,9 +160,13 @@ jobs:
           logging=disabled
           gstreamer=disabled
           default_library=static
+          benchmark_warmup_runs=10
           purpose=PiSP format-conversion/scaling benchmark on Batocera Raspberry Pi 5
           EOF
-          sha256sum artifact/pisp_convert > artifact/SHA256SUMS
+          (
+            cd artifact
+            sha256sum pisp_convert share/libpisp/backend_default_config.json > SHA256SUMS
+          )
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
