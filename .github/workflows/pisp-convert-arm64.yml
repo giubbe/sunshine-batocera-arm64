@@ -1,0 +1,77 @@
+name: Build PiSP converter ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/pisp-convert-arm64.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04-arm
+
+    steps:
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git meson ninja-build g++ pkg-config ca-certificates
+
+      - name: Fetch pinned libpisp 1.7.0
+        run: |
+          git init libpisp
+          cd libpisp
+          git remote add origin https://github.com/raspberrypi/libpisp.git
+          git fetch --depth=1 origin f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9"
+
+      - name: Configure
+        working-directory: libpisp
+        run: |
+          meson setup build \
+            --wrap-mode=forcefallback \
+            -Dbuildtype=release \
+            -Ddefault_library=static \
+            -Dlogging=disabled \
+            -Dexamples=true \
+            -Dgstreamer=disabled
+
+      - name: Build
+        working-directory: libpisp
+        run: meson compile -C build
+
+      - name: Inspect binary
+        working-directory: libpisp
+        run: |
+          file build/src/examples/convert
+          ldd build/src/examples/convert || true
+          readelf -h build/src/examples/convert | grep -E 'Class:|Machine:'
+
+      - name: Package
+        run: |
+          mkdir -p artifact
+          cp libpisp/build/src/examples/convert artifact/pisp_convert
+          chmod 0755 artifact/pisp_convert
+          cat > artifact/BUILDINFO.txt <<'EOF'
+          libpisp_version=1.7.0
+          libpisp_commit=f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+          build_runner=ubuntu-22.04-arm
+          architecture=aarch64
+          logging=disabled
+          gstreamer=disabled
+          default_library=static
+          purpose=PiSP format-conversion/scaling benchmark on Batocera Raspberry Pi 5
+          EOF
+          sha256sum artifact/pisp_convert > artifact/SHA256SUMS
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pisp-convert-batocera-arm64
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 7
