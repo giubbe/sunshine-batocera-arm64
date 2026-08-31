@@ -35,7 +35,16 @@ pisp_pkgdir="$(dirname -- "${pisp_pc}")"
 export PKG_CONFIG_PATH="${pisp_pkgdir}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
 pisp_cflags="$(pkg-config --cflags libpisp)"
 pisp_libs="$(pkg-config --libs --static libpisp)"
-printf '%s\n' "PISP_PREFIX=${PISP_PREFIX}" "PISP_CFLAGS=${pisp_cflags}" "PISP_LIBS=${pisp_libs}"
+pisp_archive="$(find "${PISP_PREFIX}" -type f -name 'libpisp.a' -print -quit)"
+if [[ -z "${pisp_archive}" || ! -f "${pisp_archive}" ]]; then
+  echo "ERROR: static libpisp archive not found under ${PISP_PREFIX}" >&2
+  exit 1
+fi
+printf '%s\n' \
+  "PISP_PREFIX=${PISP_PREFIX}" \
+  "PISP_CFLAGS=${pisp_cflags}" \
+  "PISP_LIBS=${pisp_libs}" \
+  "PISP_ARCHIVE=${pisp_archive}"
 
 for generated_dir in "${BUILD_DIR}" "${STAGE_DIR}" "${ARTIFACTS_DIR}"; do
   if [[ -e "${generated_dir}" ]]; then
@@ -52,7 +61,7 @@ cmake_args=(
   -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}"
   -DCMAKE_CXX_FLAGS="${pisp_cflags} -I${PISP_PREFIX}/include"
-  -DCMAKE_EXE_LINKER_FLAGS="${pisp_libs}"
+  -DEXTRA_LIBS="${pisp_archive};-pthread;dl"
   -DSUNSHINE_ASSETS_DIR=share/sunshine
   -DSUNSHINE_EXECUTABLE_PATH="${INSTALL_PREFIX}/bin/sunshine"
   -DBUILD_DOCS=OFF
