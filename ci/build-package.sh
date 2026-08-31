@@ -13,6 +13,7 @@ readonly BUILD_DIR="${REPO_ROOT}/build"
 readonly STAGE_DIR="${REPO_ROOT}/stage"
 readonly ARTIFACTS_DIR="${REPO_ROOT}/artifacts"
 readonly PACKAGE_DIR="${STAGE_DIR}/${PACKAGE_NAME}"
+readonly PISP_PREFIX="${PISP_PREFIX:-${REPO_ROOT}/pisp-prefix}"
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "ERROR: native aarch64 runner required; found $(uname -m)" >&2
@@ -24,6 +25,17 @@ if [[ "${actual_commit}" != "${SOURCE_COMMIT}" ]]; then
   echo "ERROR: source commit ${actual_commit}, expected ${SOURCE_COMMIT}" >&2
   exit 1
 fi
+
+pisp_pc="$(find "${PISP_PREFIX}" -type f -name 'libpisp.pc' -print -quit)"
+if [[ -z "${pisp_pc}" ]]; then
+  echo "ERROR: pinned libpisp installation not found under ${PISP_PREFIX}" >&2
+  exit 1
+fi
+pisp_pkgdir="$(dirname -- "${pisp_pc}")"
+export PKG_CONFIG_PATH="${pisp_pkgdir}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+pisp_cflags="$(pkg-config --cflags libpisp)"
+pisp_libs="$(pkg-config --libs --static libpisp)"
+printf '%s\n' "PISP_PREFIX=${PISP_PREFIX}" "PISP_CFLAGS=${pisp_cflags}" "PISP_LIBS=${pisp_libs}"
 
 for generated_dir in "${BUILD_DIR}" "${STAGE_DIR}" "${ARTIFACTS_DIR}"; do
   if [[ -e "${generated_dir}" ]]; then
@@ -39,6 +51,8 @@ cmake_args=(
   -G Ninja
   -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}"
+  -DCMAKE_CXX_FLAGS="${pisp_cflags}"
+  -DCMAKE_EXE_LINKER_FLAGS="${pisp_libs}"
   -DSUNSHINE_ASSETS_DIR=share/sunshine
   -DSUNSHINE_EXECUTABLE_PATH="${INSTALL_PREFIX}/bin/sunshine"
   -DBUILD_DOCS=OFF
@@ -74,6 +88,12 @@ fi
 
 cp -a -- "${install_root}/bin/sunshine" "${PACKAGE_DIR}/bin/sunshine"
 cp -a -- "${install_root}/share" "${PACKAGE_DIR}/share"
+
+# PiSP is linked statically. Ship the exact backend defaults used by libpisp
+# so runtime behaviour is independent of the Batocera root filesystem.
+install -Dm0644 \
+  "${REPO_ROOT}/libpisp/src/libpisp/backend/backend_default_config.json" \
+  "${PACKAGE_DIR}/share/libpisp/backend/backend_default_config.json"
 
 # Batocera was verified to miss Ubuntu's ICU 74 ABI. Bundle only the ICU 74
 # closure actually referenced by Sunshine; never manufacture cross-ABI links.
@@ -111,6 +131,7 @@ SUNSHINE_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
 export XDG_RUNTIME_DIR=/var/run
 export WAYLAND_DISPLAY=wayland-0
 export LD_LIBRARY_PATH="${SUNSHINE_ROOT}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export LIBPISP_BE_CONFIG_FILE="${SUNSHINE_ROOT}/share/libpisp/backend/backend_default_config.json"
 export SUNSHINE_ASSETS="${SUNSHINE_ROOT}/share/sunshine"
 export SUNSHINE_WEBROOT="${SUNSHINE_ROOT}/share/sunshine/web"
 export SUNSHINE_APP_ICONS="${SUNSHINE_ROOT}/share/sunshine"
@@ -118,10 +139,6 @@ exec "${SUNSHINE_ROOT}/bin/sunshine" "$@"
 WRAPPER
 chmod 0755 "${PACKAGE_DIR}/bin/sunshine-start"
 
-# Ship the Batocera user-service template inside the add-on and an installer
-# that copies it to /userdata/system/services/sunshine. The service waits for
-# Wayland and dynamic dependencies before starting Sunshine, avoiding the
-# boot race observed with Batocera's parallel S99userservices launcher.
 install -Dm0755 \
   "${REPO_ROOT}/batocera/sunshine" \
   "${PACKAGE_DIR}/share/batocera/sunshine"
@@ -135,15 +152,17 @@ Source commit: ${SOURCE_COMMIT}
 Install path: ${INSTALL_PREFIX}
 Manual start: ${INSTALL_PREFIX}/bin/sunshine-start
 Install Batocera service: ${INSTALL_PREFIX}/bin/install-batocera-service
+Experimental converter: Raspberry Pi PiSP (RGB888 -> YUV420P), with libswscale fallback
+libpisp commit: f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
 
 The packaged Batocera user service waits for Wayland and for all dynamic
 Sunshine dependencies to resolve before starting. It defaults to
 /userdata/system/.config/sunshine/sunshine.conf and can be overridden through
 /userdata/system/configs/sunshine-service.conf.
 
-Only the ICU 74 closure required by Sunshine is bundled. Other dynamic
-libraries must be provided by the Batocera target. Ubuntu CI ldd results are
-not equivalent to runtime validation on Batocera.
+Only the ICU 74 closure required by Sunshine is bundled. libpisp is linked
+statically and its backend_default_config.json is bundled in share/libpisp.
+Other dynamic libraries must be provided by the Batocera target.
 EOF
 
 (
