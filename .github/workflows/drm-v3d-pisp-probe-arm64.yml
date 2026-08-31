@@ -40,6 +40,7 @@ jobs:
       - name: Compile probe
         run: |
           c++ -std=c++20 -O2 -Wall -Wextra \
+            -include drm_fourcc.h \
             tools/drm-v3d-pisp-probe.cpp \
             -Ilibpisp/src -Ilibpisp/src/libpisp -Ilibpisp/include -Ilibpisp/build \
             -I/usr/include/libdrm \
