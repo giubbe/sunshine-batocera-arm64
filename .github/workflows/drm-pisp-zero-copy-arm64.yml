@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'tools/patch-libpisp-drm-zero-copy.py'
+      - 'tools/patch-libpisp-drm-zero-copy-v2.py'
       - '.github/workflows/drm-pisp-zero-copy-arm64.yml'
 
 jobs:
@@ -27,10 +27,10 @@ jobs:
 
       - name: Patch zero-copy probe
         run: |
-          cp tools/patch-libpisp-drm-zero-copy.py libpisp/
+          cp tools/patch-libpisp-drm-zero-copy-v2.py libpisp/
           cd libpisp
-          python3 patch-libpisp-drm-zero-copy.py
-          grep -F -- '--drm-fb-id' src/examples/convert.cpp
+          python3 patch-libpisp-drm-zero-copy-v2.py
+          grep -F -- 'drm-fb-id' src/examples/convert.cpp
           grep -F 'XRGB8888' src/examples/convert.cpp
           grep -F "dependency('libdrm')" src/examples/meson.build
 
