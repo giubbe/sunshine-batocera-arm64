@@ -1,0 +1,56 @@
+name: Build DRM framebuffer probe ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/drm-fb-probe.cpp'
+      - '.github/workflows/drm-fb-probe-arm64.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ pkg-config libdrm-dev
+
+      - name: Build
+        run: |
+          mkdir -p build
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic \
+            tools/drm-fb-probe.cpp \
+            -o build/drm-fb-probe \
+            $(pkg-config --cflags --libs libdrm)
+
+      - name: Inspect binary
+        run: |
+          file build/drm-fb-probe
+          readelf -h build/drm-fb-probe | grep -E 'Class:|Machine:'
+          ldd build/drm-fb-probe
+
+      - name: Package
+        run: |
+          mkdir -p artifact
+          cp build/drm-fb-probe artifact/
+          {
+            echo 'tool=drm-fb-probe'
+            echo 'target=Batocera ARM64 / Raspberry Pi 5'
+            echo "source_commit=${GITHUB_SHA}"
+            echo "runner=${RUNNER_OS}-${RUNNER_ARCH}"
+          } > artifact/BUILDINFO
+          (cd artifact && sha256sum drm-fb-probe > SHA256SUMS)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drm-fb-probe-batocera-arm64
+          path: artifact/
+          retention-days: 7
