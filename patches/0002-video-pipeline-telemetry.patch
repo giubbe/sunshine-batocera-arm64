@@ -1,0 +1,104 @@
+diff --git a/src/video.cpp b/src/video.cpp
+--- a/src/video.cpp
++++ b/src/video.cpp
+@@ -2072,6 +2072,21 @@ namespace video {
+       }
+     }
+ 
++    // Diagnostic telemetry for sustained software-encoding tests on Batocera.
++    // Emit one aggregate line per second to avoid making logging itself a
++    // significant part of the video pipeline.
++    auto telemetry_window_start = std::chrono::steady_clock::now();
++    uint64_t telemetry_frames = 0;
++    uint64_t telemetry_convert_calls = 0;
++    uint64_t telemetry_age_samples = 0;
++    double telemetry_convert_sum_ms = 0.0;
++    double telemetry_convert_max_ms = 0.0;
++    double telemetry_encode_sum_ms = 0.0;
++    double telemetry_encode_max_ms = 0.0;
++    double telemetry_age_in_sum_ms = 0.0;
++    double telemetry_age_in_max_ms = 0.0;
++    double telemetry_age_out_sum_ms = 0.0;
++    double telemetry_age_out_max_ms = 0.0;
++
+     while (true) {
+       // Break out of the encoding loop if any of the following are true:
+       // a) The stream is ending
+@@ -2106,16 +2121,62 @@ namespace video {
+       std::optional<std::chrono::steady_clock::time_point> frame_timestamp;
+ 
+       // Encode at a minimum FPS to avoid image quality issues with static content
+       if (!requested_idr_frame || images->peek()) {
+         if (auto img = images->pop(max_frametime)) {
+           frame_timestamp = img->frame_timestamp;
++
++          if (frame_timestamp) {
++            const auto age_in_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - *frame_timestamp).count();
++            telemetry_age_in_sum_ms += age_in_ms;
++            telemetry_age_in_max_ms = std::max(telemetry_age_in_max_ms, age_in_ms);
++            ++telemetry_age_samples;
++          }
++
++          const auto convert_start = std::chrono::steady_clock::now();
+           if (session->convert(*img)) {
+             BOOST_LOG(error) << "Could not convert image"sv;
+             return;
+           }
++          const auto convert_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - convert_start).count();
++          telemetry_convert_sum_ms += convert_ms;
++          telemetry_convert_max_ms = std::max(telemetry_convert_max_ms, convert_ms);
++          ++telemetry_convert_calls;
+         } else if (!images->running()) {
+           break;
+         }
+       }
+ 
++      const auto encode_start = std::chrono::steady_clock::now();
+       if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp)) {
+         BOOST_LOG(error) << "Could not encode video packet"sv;
+         return;
+       }
++      const auto encode_end = std::chrono::steady_clock::now();
++      const auto encode_ms = std::chrono::duration<double, std::milli>(encode_end - encode_start).count();
++      telemetry_encode_sum_ms += encode_ms;
++      telemetry_encode_max_ms = std::max(telemetry_encode_max_ms, encode_ms);
++      ++telemetry_frames;
++
++      if (frame_timestamp) {
++        const auto age_out_ms = std::chrono::duration<double, std::milli>(encode_end - *frame_timestamp).count();
++        telemetry_age_out_sum_ms += age_out_ms;
++        telemetry_age_out_max_ms = std::max(telemetry_age_out_max_ms, age_out_ms);
++      }
++
++      const auto telemetry_elapsed = encode_end - telemetry_window_start;
++      if (telemetry_elapsed >= 1s) {
++        const auto elapsed_s = std::chrono::duration<double>(telemetry_elapsed).count();
++        const auto convert_avg_ms = telemetry_convert_calls ? telemetry_convert_sum_ms / telemetry_convert_calls : 0.0;
++        const auto encode_avg_ms = telemetry_frames ? telemetry_encode_sum_ms / telemetry_frames : 0.0;
++        const auto age_in_avg_ms = telemetry_age_samples ? telemetry_age_in_sum_ms / telemetry_age_samples : 0.0;
++        const auto age_out_avg_ms = telemetry_age_samples ? telemetry_age_out_sum_ms / telemetry_age_samples : 0.0;
++
++        BOOST_LOG(info) << "PIPELINE_TELEMETRY frames=" << telemetry_frames
++                        << " fps=" << (telemetry_frames / elapsed_s)
++                        << " convert_calls=" << telemetry_convert_calls
++                        << " convert_avg_ms=" << convert_avg_ms
++                        << " convert_max_ms=" << telemetry_convert_max_ms
++                        << " encode_avg_ms=" << encode_avg_ms
++                        << " encode_max_ms=" << telemetry_encode_max_ms
++                        << " age_samples=" << telemetry_age_samples
++                        << " age_in_avg_ms=" << age_in_avg_ms
++                        << " age_in_max_ms=" << telemetry_age_in_max_ms
++                        << " age_out_avg_ms=" << age_out_avg_ms
++                        << " age_out_max_ms=" << telemetry_age_out_max_ms;
++
++        telemetry_window_start = encode_end;
++        telemetry_frames = telemetry_convert_calls = telemetry_age_samples = 0;
++        telemetry_convert_sum_ms = telemetry_convert_max_ms = 0.0;
++        telemetry_encode_sum_ms = telemetry_encode_max_ms = 0.0;
++        telemetry_age_in_sum_ms = telemetry_age_in_max_ms = 0.0;
++        telemetry_age_out_sum_ms = telemetry_age_out_max_ms = 0.0;
++      }
+ 
+       session->request_normal_frame();
+ 
+       // While streaming check to see if the mouse is present and enable Mouse Keys to force the cursor to appear
