@@ -1,0 +1,41 @@
+name: Build EGL DMA-BUF formats probe ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/egl-dmabuf-formats-probe.cpp'
+      - '.github/workflows/egl-dmabuf-formats-probe-arm64.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ pkg-config libdrm-dev libegl1-mesa-dev libgbm-dev
+
+      - name: Compile probe
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra \
+            tools/egl-dmabuf-formats-probe.cpp \
+            -I/usr/include/libdrm \
+            $(pkg-config --cflags --libs egl gbm libdrm) \
+            -o egl-dmabuf-formats-probe
+          file egl-dmabuf-formats-probe
+          ldd egl-dmabuf-formats-probe
+
+      - name: Package artifact
+        run: |
+          mkdir artifact
+          cp egl-dmabuf-formats-probe artifact/
+          (cd artifact && sha256sum egl-dmabuf-formats-probe > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: egl-dmabuf-formats-probe-batocera-arm64
+          path: artifact/
+          retention-days: 7
