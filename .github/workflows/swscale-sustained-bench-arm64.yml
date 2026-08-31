@@ -1,0 +1,33 @@
+name: Build sustained swscale telemetry benchmark ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/swscale-sustained-bench.cpp'
+      - '.github/workflows/swscale-sustained-bench-arm64.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libavutil-dev libswscale-dev
+      - name: Compile
+        run: |
+          c++ -std=c++20 -O3 -Wall -Wextra tools/swscale-sustained-bench.cpp -ldl -o swscale-sustained-bench
+          file swscale-sustained-bench
+          ldd swscale-sustained-bench
+      - name: Package
+        run: |
+          mkdir artifact
+          cp swscale-sustained-bench artifact/
+          (cd artifact && sha256sum swscale-sustained-bench > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swscale-sustained-bench-batocera-arm64
+          path: artifact/
+          retention-days: 7
