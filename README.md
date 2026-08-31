@@ -23,36 +23,82 @@ precedenti.
 
 ## Perche' questa build invece della BUA
 
-La variante ARM64 di Batocera Unofficial Add-ons (BUA) installa un
-`Sunshine-aarch64.AppImage`, abilita `encoder = software` e avvia l'AppImage
-tramite FUSE. Questa implementazione segue un approccio diverso e piu' adatto al
-target Raspberry Pi 5/Batocera testato:
+La variante ARM64 di Batocera Unofficial Add-ons (BUA) installa
+`Sunshine-aarch64.AppImage` e crea una configurazione con:
 
-- **KMS disponibile:** Sunshine upstream avverte che l'AppImage non supporta la
-  cattura KMS. Questa build e' invece compilata con `SUNSHINE_ENABLE_DRM=ON` e
-  puo' usare `capture = kms`, che e' la modalita' consigliata su questo target.
-- **Build riproducibile e sorgente fissato:** tag, commit upstream, opzioni CMake
-  e runner ARM64 sono espliciti e verificati dalla CI. Non viene semplicemente
-  scaricato un AppImage precompilato dal repository.
-- **Niente FUSE/AppImage a runtime:** il pacchetto contiene il binario e gli
-  asset installabili direttamente sotto `/userdata/system/add-ons/sunshine`.
-- **Dipendenze controllate:** vengono incluse solo le librerie ICU 74 realmente
-  necessarie al binario prodotto; non vengono inventati symlink ABI.
-- **Audit CI:** architettura AArch64, `DT_NEEDED`, bundle, identita' della build,
-  wrapper e servizio Batocera vengono controllati prima di produrre l'artifact.
-- **Servizio Batocera robusto:** il launcher aspetta che Wayland e le dipendenze
-  runtime siano realmente disponibili, evitando la race osservata durante il
-  boot di Batocera.
-- **Cattura audio asincrona:** la build applica una piccola patch Linux che
-  sostituisce il percorso sincrono `libpulse-simple/pa_simple_read()` con un
-  `pa_stream` asincrono e una coda PCM. Nei test sul target questo ha eliminato
-  la corruzione del monitor PipeWire che il percorso sincrono riusciva a
-  provocare durante la cattura.
+```ini
+encoder = software
+sw_preset = ultrafast
+```
 
-Queste differenze non significano che BUA sia in generale "sbagliata": il suo
-AppImage privilegia semplicita' di distribuzione e portabilita'. Questo progetto
-privilegia invece **controllo, KMS, riproducibilita' e validazione specifica sul
-Pi 5**.
+Riferimento BUA:
+https://github.com/batocera-unofficial-addons/batocera-unofficial-addons/blob/main/sunshine/sunshine-arm64.sh
+
+Questa build adotta invece un approccio differente:
+
+- **Supporto KMS/DRM:** la documentazione ufficiale di Sunshine dichiara che
+  l'AppImage non supporta la cattura KMS. Questa build viene compilata con
+  `SUNSHINE_ENABLE_DRM=ON`; Sunshine definisce questa opzione come supporto alla
+  cattura KMS quando disponibile.
+
+  Documentazione Sunshine:
+  https://docs.lizardbyte.dev/projects/sunshine/master/md_docs_2getting__started.html
+
+  Opzioni di build upstream:
+  https://github.com/LizardByte/Sunshine/blob/master/cmake/prep/options.cmake
+
+- **Sorgente fissato e build ARM64 nativa:** il workflow effettua il checkout
+  del commit Sunshine `14ffa6fdaa53f7b51512be2b3d24f3939695403c`, verifica
+  che il checkout corrisponda esattamente a quel commit e richiede un runner
+  `aarch64`. La build viene eseguita su GitHub Actions con `ubuntu-24.04-arm`.
+
+  Workflow:
+  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/.github/workflows/build.yml
+
+- **Installazione senza AppImage:** l'artifact prodotto contiene direttamente
+  il binario Sunshine e gli asset destinati a
+  `/userdata/system/add-ons/sunshine`; l'avvio non richiede quindi l'AppImage
+  utilizzata dall'installer BUA.
+
+  Script di build:
+  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/ci/build-package.sh
+
+- **Bundle ICU esplicito:** lo script di packaging individua tramite `DT_NEEDED`
+  le librerie ICU 74 richieste dal binario e include nel bundle esclusivamente
+  la relativa closure `libicuuc`, `libicudata` e `libicui18n` quando necessaria.
+  Lo script non crea symlink per sostituire versioni ABI differenti.
+
+  Script di build:
+  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/ci/build-package.sh
+
+- **Controlli CI:** prima della creazione dell'artifact vengono verificati
+  l'architettura AArch64, l'identita' del sorgente e l'applicazione della patch
+  audio; lo script di packaging esegue inoltre l'audit previsto dal progetto
+  prima di creare il tarball.
+
+  Workflow:
+  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/.github/workflows/build.yml
+
+- **Avvio differito sul target:** il pacchetto include un servizio Batocera
+  progettato per attendere la disponibilita' del socket Wayland e la
+  risoluzione delle dipendenze dinamiche prima di avviare Sunshine.
+
+  Script di build:
+  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/ci/build-package.sh
+
+- **Patch della cattura audio Linux:** prima della compilazione il workflow
+  applica `0001-linux-audio-pa-stream-callback.patch` e verifica che nel
+  sorgente risultante siano presenti `pa_stream_connect_record()` e
+  `pa_stream_set_read_callback()` e che il precedente percorso di cattura
+  basato su `pa_simple_read()` non sia piu' presente.
+
+  Workflow:
+  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/.github/workflows/build.yml
+
+Queste sono differenze tecniche verificabili tra i due metodi di distribuzione.
+Non implicano, da sole, che questa build sia generalmente piu' veloce, piu'
+stabile o migliore della variante BUA. Le prestazioni e il comportamento
+runtime devono essere verificati sul target reale.
 
 ## Configurazione consigliata sul Raspberry Pi 5
 
