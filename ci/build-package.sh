@@ -51,7 +51,7 @@ cmake_args=(
   -G Ninja
   -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}"
-  -DCMAKE_CXX_FLAGS="${pisp_cflags}"
+  -DCMAKE_CXX_FLAGS="${pisp_cflags} -I${PISP_PREFIX}/include"
   -DCMAKE_EXE_LINKER_FLAGS="${pisp_libs}"
   -DSUNSHINE_ASSETS_DIR=share/sunshine
   -DSUNSHINE_EXECUTABLE_PATH="${INSTALL_PREFIX}/bin/sunshine"
