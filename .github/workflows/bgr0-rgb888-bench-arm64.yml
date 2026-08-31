@@ -1,0 +1,39 @@
+name: Build BGR0 RGB888 benchmark ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/bgr0-rgb888-bench.cpp'
+      - '.github/workflows/bgr0-rgb888-bench-arm64.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++
+
+      - name: Compile benchmark
+        run: |
+          c++ -std=c++20 -O3 -march=armv8-a -Wall -Wextra \
+            tools/bgr0-rgb888-bench.cpp \
+            -o bgr0-rgb888-bench
+          file bgr0-rgb888-bench
+          ldd bgr0-rgb888-bench
+
+      - name: Package artifact
+        run: |
+          mkdir artifact
+          cp bgr0-rgb888-bench artifact/
+          (cd artifact && sha256sum bgr0-rgb888-bench > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bgr0-rgb888-bench-batocera-arm64
+          path: artifact/
+          retention-days: 7
