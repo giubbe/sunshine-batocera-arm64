@@ -144,7 +144,7 @@ jobs:
           file build/src/examples/convert
           ldd build/src/examples/convert || true
           readelf -h build/src/examples/convert | grep -E 'Class:|Machine:'
-          build/src/examples/convert --help | grep -F -- '--benchmark'
+          build/src/examples/convert --help 2>&1 | grep -F -- '--benchmark'
 
       - name: Package
         run: |
@@ -165,8 +165,8 @@ jobs:
           EOF
           (
             cd artifact
-            sha256sum pisp_convert share/libpisp/backend_default_config.json > SHA256SUMS
-          )
+            sha256sum pisp_convert share/libpisp/backend/backend_default_config.json 2>/dev/null || sha256sum pisp_convert share/libpisp/backend_default_config.json
+          ) > artifact/SHA256SUMS
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
