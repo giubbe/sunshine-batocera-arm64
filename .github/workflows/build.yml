@@ -59,6 +59,15 @@ jobs:
             exit 1
           fi
 
+      - name: Inject pre/post Opus audio diagnostic probe
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/inject-audio-opus-probe.py
+          grep -nF 'AUDIO_PROBE enabled' source/src/audio.cpp
+          grep -nF 'AUDIO_PROBE complete' source/src/audio.cpp
+          git -C source diff --check
+
       - name: Inject video pipeline telemetry
         shell: bash
         run: |
