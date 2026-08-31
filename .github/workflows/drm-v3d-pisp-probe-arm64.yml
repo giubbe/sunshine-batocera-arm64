@@ -41,7 +41,7 @@ jobs:
         run: |
           c++ -std=c++20 -O2 -Wall -Wextra \
             tools/drm-v3d-pisp-probe.cpp \
-            -Ilibpisp/src -Ilibpisp/include -Ilibpisp/build \
+            -Ilibpisp/src -Ilibpisp/src/libpisp -Ilibpisp/include -Ilibpisp/build \
             -I/usr/include/libdrm \
             -Llibpisp/build/src -lpisp \
             $(pkg-config --cflags --libs libdrm egl glesv2 gbm) \
