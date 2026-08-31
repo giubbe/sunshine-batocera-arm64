@@ -59,13 +59,14 @@ jobs:
             exit 1
           fi
 
-      - name: Apply video pipeline telemetry patch
+      - name: Inject video pipeline telemetry
         shell: bash
         run: |
           set -Eeuo pipefail
-          git -C source apply --check ../patches/0002-video-pipeline-telemetry.patch
-          git -C source apply ../patches/0002-video-pipeline-telemetry.patch
+          python3 tools/inject-video-pipeline-telemetry.py source/src/video.cpp
           grep -nF 'PIPELINE_TELEMETRY' source/src/video.cpp
+          git -C source diff --check
+          git -C source diff -- src/video.cpp
 
       - name: Install build dependencies
         shell: bash
