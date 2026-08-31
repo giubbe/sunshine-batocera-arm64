@@ -1,0 +1,75 @@
+name: Build DRM PiSP zero-copy probe ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/patch-libpisp-drm-zero-copy.py'
+      - '.github/workflows/drm-pisp-zero-copy-arm64.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git meson ninja-build g++ pkg-config ca-certificates libdrm-dev
+
+      - name: Fetch pinned libpisp
+        run: |
+          git clone https://github.com/raspberrypi/libpisp.git libpisp
+          cd libpisp
+          git checkout f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+          test "$(git rev-parse HEAD)" = f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+
+      - name: Patch zero-copy probe
+        run: |
+          cp tools/patch-libpisp-drm-zero-copy.py libpisp/
+          cd libpisp
+          python3 patch-libpisp-drm-zero-copy.py
+          grep -F -- '--drm-fb-id' src/examples/convert.cpp
+          grep -F 'XRGB8888' src/examples/convert.cpp
+          grep -F "dependency('libdrm')" src/examples/meson.build
+
+      - name: Build
+        run: |
+          cd libpisp
+          meson setup build \
+            --wrap-mode=forcefallback \
+            -Dbuildtype=release \
+            -Ddefault_library=static \
+            -Dlogging=disabled \
+            -Dexamples=true \
+            -Dgstreamer=disabled
+          meson compile -C build
+
+      - name: Inspect binary
+        run: |
+          cd libpisp
+          file build/src/examples/convert
+          readelf -h build/src/examples/convert | grep -E 'Class:|Machine:'
+          ldd build/src/examples/convert || true
+          build/src/examples/convert --help 2>&1 | grep -F -- '--drm-fb-id'
+
+      - name: Package
+        run: |
+          mkdir -p artifact/share/libpisp
+          cp libpisp/build/src/examples/convert artifact/drm-pisp-zero-copy-probe
+          cp libpisp/src/libpisp/backend/backend_default_config.json artifact/share/libpisp/backend_default_config.json
+          cat > artifact/BUILDINFO <<'EOF'
+          purpose=DRM PRIME DMA-BUF to PiSP zero-copy probe
+          libpisp_commit=f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+          target=aarch64-linux
+          input=XR24/XRGB8888 DRM framebuffer
+          output=YUV420P
+          EOF
+          (cd artifact && sha256sum drm-pisp-zero-copy-probe share/libpisp/backend_default_config.json > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drm-pisp-zero-copy-batocera-arm64
+          path: artifact/
+          retention-days: 7
