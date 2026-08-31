@@ -65,6 +65,13 @@ jobs:
           set -Eeuo pipefail
           python3 tools/inject-video-pipeline-telemetry.py source/src/video.cpp
           grep -nF 'PIPELINE_TELEMETRY' source/src/video.cpp
+
+      - name: Inject Raspberry Pi 5 PiSP converter
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/inject-pisp-software-converter.py
+          grep -nF 'PISP_CONVERTER enabled' source/src/video.cpp
           git -C source diff --check
           git -C source diff -- src/video.cpp
 
@@ -95,6 +102,7 @@ jobs:
             libudev-dev \
             libva-dev \
             libwayland-dev \
+            meson \
             ninja-build \
             nodejs \
             npm \
@@ -105,8 +113,34 @@ jobs:
             systemd-dev \
             udev
 
+      - name: Build pinned libpisp 1.7.0
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git init libpisp
+          git -C libpisp remote add origin https://github.com/raspberrypi/libpisp.git
+          git -C libpisp fetch --depth=1 origin f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+          git -C libpisp checkout --detach FETCH_HEAD
+          test "$(git -C libpisp rev-parse HEAD)" = f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+          meson setup libpisp/build libpisp \
+            --prefix="$GITHUB_WORKSPACE/pisp-prefix" \
+            --wrap-mode=forcefallback \
+            -Dbuildtype=release \
+            -Ddefault_library=static \
+            -Dlogging=disabled \
+            -Dexamples=false \
+            -Dgstreamer=disabled
+          meson compile -C libpisp/build
+          meson install -C libpisp/build
+          test -f pisp-prefix/lib/aarch64-linux-gnu/libpisp.a || test -f pisp-prefix/lib/libpisp.a
+          find pisp-prefix -maxdepth 4 -type f -print
+
       - name: Build, package, and audit
         shell: bash
+        env:
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/pisp-prefix
+          PKG_CONFIG_PATH: ${{ github.workspace }}/pisp-prefix/lib/aarch64-linux-gnu/pkgconfig:${{ github.workspace }}/pisp-prefix/lib/pkgconfig
+          PISP_PREFIX: ${{ github.workspace }}/pisp-prefix
         run: |
           set -o pipefail
           chmod +x ci/build-package.sh ci/audit-package.sh
