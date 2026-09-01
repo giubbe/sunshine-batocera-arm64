@@ -37,7 +37,7 @@ grep -Fq 'runtime_dependencies_ready' "${SERVICE_TEMPLATE}"
 grep -Fq 'batocera-services enable sunshine' "${SERVICE_INSTALLER}"
 
 echo "== Effective CMake profile =="
-grep -E '^(BUILD_DOCS|BUILD_TESTS|BUILD_WERROR|CMAKE_BUILD_TYPE|CMAKE_INSTALL_PREFIX|SUNSHINE_ASSETS_DIR|SUNSHINE_EXECUTABLE_PATH|SUNSHINE_ENABLE_(TRAY|CUDA|VULKAN|X11|KWIN|PORTAL|WAYLAND|DRM|VAAPI)):' \
+grep -E '^(BUILD_DOCS|BUILD_TESTS|BUILD_WERROR|CMAKE_BUILD_TYPE|CMAKE_INSTALL_PREFIX|CMAKE_INTERPROCEDURAL_OPTIMIZATION|SUNSHINE_ASSETS_DIR|SUNSHINE_EXECUTABLE_PATH|SUNSHINE_ENABLE_(TRAY|CUDA|VULKAN|X11|KWIN|PORTAL|WAYLAND|DRM|VAAPI)):' \
   "${BUILD_DIR}/CMakeCache.txt" | LC_ALL=C sort
 
 echo "== Architecture =="
@@ -81,15 +81,24 @@ if readelf -d "${SUNSHINE}" | grep -Eiq "${FORBIDDEN_REGEX}"; then
   exit 1
 fi
 
-# The Batocera patch deliberately uses the asynchronous libpulse API instead
-# of libpulse-simple. Keep this property explicit so a future source/build
-# change cannot silently restore the synchronous capture dependency.
+# This build deliberately keeps the pinned Sunshine upstream PulseAudio capture
+# implementation. Upstream uses pa_simple_read(), so both libpulse and
+# libpulse-simple are expected dependencies. The experimental pa_stream callback
+# used during diagnostics is not applied to this build.
 if ! readelf -d "${SUNSHINE}" | grep -Fq '[libpulse.so.0]'; then
   echo "ERROR: expected libpulse.so.0 dependency not found" >&2
   exit 1
 fi
-if readelf -d "${SUNSHINE}" | grep -Fq '[libpulse-simple.so.0]'; then
-  echo "ERROR: unexpected libpulse-simple.so.0 dependency found" >&2
+if ! readelf -d "${SUNSHINE}" | grep -Fq '[libpulse-simple.so.0]'; then
+  echo "ERROR: expected upstream libpulse-simple.so.0 dependency not found" >&2
+  exit 1
+fi
+if strings "${SUNSHINE}" | grep -Fq 'AUDIO_PROBE'; then
+  echo "ERROR: diagnostic audio probe unexpectedly embedded" >&2
+  exit 1
+fi
+if strings "${SUNSHINE}" | grep -Fq 'PIPELINE_TELEMETRY'; then
+  echo "ERROR: diagnostic video telemetry unexpectedly embedded" >&2
   exit 1
 fi
 
