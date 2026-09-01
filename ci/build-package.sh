@@ -5,6 +5,7 @@ readonly SOURCE_COMMIT="14ffa6fdaa53f7b51512be2b3d24f3939695403c"
 readonly SOURCE_TAG="v2026.516.143833"
 readonly INSTALL_PREFIX="/userdata/system/add-ons/sunshine"
 readonly PACKAGE_NAME="sunshine-batocera-arm64"
+readonly PI5_CPU_FLAGS="-O3 -mcpu=cortex-a76 -mtune=cortex-a76"
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
@@ -44,7 +45,8 @@ printf '%s\n' \
   "PISP_PREFIX=${PISP_PREFIX}" \
   "PISP_CFLAGS=${pisp_cflags}" \
   "PISP_LIBS=${pisp_libs}" \
-  "PISP_ARCHIVE=${pisp_archive}"
+  "PISP_ARCHIVE=${pisp_archive}" \
+  "PI5_CPU_FLAGS=${PI5_CPU_FLAGS}"
 
 for generated_dir in "${BUILD_DIR}" "${STAGE_DIR}" "${ARTIFACTS_DIR}"; do
   if [[ -e "${generated_dir}" ]]; then
@@ -59,8 +61,11 @@ cmake_args=(
   -B "${BUILD_DIR}"
   -G Ninja
   -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
   -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}"
+  -DCMAKE_C_FLAGS_RELEASE="${PI5_CPU_FLAGS} -DNDEBUG"
   -DCMAKE_CXX_FLAGS="${pisp_cflags} -I${PISP_PREFIX}/include"
+  -DCMAKE_CXX_FLAGS_RELEASE="${PI5_CPU_FLAGS} -DNDEBUG"
   -DEXTRA_LIBS="${pisp_archive};-pthread;dl"
   -DSUNSHINE_ASSETS_DIR=share/sunshine
   -DSUNSHINE_EXECUTABLE_PATH="${INSTALL_PREFIX}/bin/sunshine"
@@ -156,13 +161,18 @@ install -Dm0755 \
   "${PACKAGE_DIR}/bin/install-batocera-service"
 
 cat > "${PACKAGE_DIR}/README.txt" <<EOF
-Sunshine ${SOURCE_TAG} for Batocera 43apu.1 / Raspberry Pi 5 aarch64
+Sunshine ${SOURCE_TAG} experimental PiSP test build for Batocera 43apu.1 / Raspberry Pi 5 aarch64
 Source commit: ${SOURCE_COMMIT}
 Install path: ${INSTALL_PREFIX}
 Manual start: ${INSTALL_PREFIX}/bin/sunshine-start
 Install Batocera service: ${INSTALL_PREFIX}/bin/install-batocera-service
 Experimental converter: Raspberry Pi PiSP (RGB888 -> YUV420P), with libswscale fallback
 libpisp commit: f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+Build optimization: Release + LTO/IPO + Cortex-A76 CPU tuning
+Audio capture: unmodified Sunshine upstream pa_simple path
+
+This is an experimental test build, not a claim of superiority over BUA or
+upstream Sunshine. The PiSP conversion path is the principal experiment.
 
 The packaged Batocera user service waits for Wayland and for all dynamic
 Sunshine dependencies to resolve before starting. It defaults to
