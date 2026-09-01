@@ -1,0 +1,28 @@
+name: Probe BUA Sunshine ARM64 version
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - probe-bua-version
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Download current BUA ARM64 AppImage and inspect Sunshine version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          url='https://github.com/batocera-unofficial-addons/batocera-unofficial-addons/raw/refs/heads/main/sunshine/extra/Sunshine-aarch64.AppImage'
+          curl -fL "$url" -o Sunshine-aarch64.AppImage
+          chmod +x Sunshine-aarch64.AppImage
+          sha256sum Sunshine-aarch64.AppImage
+          file Sunshine-aarch64.AppImage
+          ./Sunshine-aarch64.AppImage --appimage-version || true
+          ./Sunshine-aarch64.AppImage --version || true
+          ./Sunshine-aarch64.AppImage --help 2>&1 | head -n 40 || true
+          strings Sunshine-aarch64.AppImage | grep -E -m 20 'v20[0-9]{2}\.|Sunshine [0-9]|Version:' || true
