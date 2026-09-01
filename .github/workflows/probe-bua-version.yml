@@ -23,6 +23,14 @@ jobs:
           sha256sum Sunshine-aarch64.AppImage
           file Sunshine-aarch64.AppImage
           ./Sunshine-aarch64.AppImage --appimage-version || true
-          ./Sunshine-aarch64.AppImage --version || true
-          ./Sunshine-aarch64.AppImage --help 2>&1 | head -n 40 || true
-          strings Sunshine-aarch64.AppImage | grep -E -m 20 'v20[0-9]{2}\.|Sunshine [0-9]|Version:' || true
+          ./Sunshine-aarch64.AppImage --appimage-extract >/dev/null
+          echo '--- candidate Sunshine binaries ---'
+          find squashfs-root -type f -perm -0100 -print | grep -Ei '/sunshine$|Sunshine$' || true
+          echo '--- AppRun ---'
+          sed -n '1,160p' squashfs-root/AppRun 2>/dev/null || true
+          while IFS= read -r candidate; do
+            echo "--- probing $candidate ---"
+            "$candidate" --version 2>&1 || true
+            "$candidate" --help 2>&1 | head -n 20 || true
+            strings "$candidate" | grep -E -m 20 'v20[0-9]{2}\.[0-9]+\.[0-9]+|Sunshine v?[0-9]|Version:' || true
+          done < <(find squashfs-root -type f -perm -0100 -print | grep -Ei '/sunshine$|Sunshine$' || true)
