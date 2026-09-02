@@ -1,8 +1,12 @@
 # Sunshine ARM64 per Batocera 43 / Raspberry Pi 5
 
-> [!WARNING]
-> **Experimental/test build.** Non e' una release stabile: l'artifact esatto
-> prodotto dalla CI deve ancora essere provato sul Raspberry Pi 5 reale.
+> [!NOTE]
+> **Experimental PiSP build validata sul Raspberry Pi 5 reale.** La build ARM64
+> passa i gate CI e il percorso PiSP e' stato verificato runtime sul target
+> Batocera usato per i test, inclusa la conversione con padding 640x480 ->
+> 960x720 -> 1280x720. I risultati riportati qui descrivono il target e lo
+> scenario misurati; non costituiscono una garanzia universale di prestazioni o
+> compatibilita' su altre configurazioni.
 
 Questo harness costruisce Sunshine per Raspberry Pi 5 / BCM2712 / Cortex-A76,
 Batocera `43apu.1` e AArch64, con installazione in
@@ -23,8 +27,9 @@ La compilazione Sunshine usa Release, `-O3 -mcpu=cortex-a76
 -mtune=cortex-a76` e CMake IPO/LTO. libpisp usa gli stessi flag CPU e di
 ottimizzazione, ma non LTO: evitare LTO attraverso Meson/CMake mantiene semplice
 e riproducibile il linking statico. Non sono usati `-ffast-math`, `-Ofast` o
-assunzioni di undefined behaviour. Queste scelte non costituiscono un benchmark
-ne' dimostrano un guadagno prestazionale.
+assunzioni di undefined behaviour. Queste scelte, da sole, non dimostrano un
+guadagno prestazionale; il benchmark runtime controllato e' riportato piu'
+avanti.
 
 ## Differenze rispetto alla variante BUA ARM64
 
@@ -80,6 +85,47 @@ operativo rilevante.
 garantisce la risoluzione di rendering interna di Flycast. Il precedente test
 interpretato come rendering a 720p aveva modificato l'opzione sbagliata: il
 risultato utile e' stato osservato con la vera RENDER RESOLUTION a 640x480.
+
+## Benchmark controllato PiSP vs no-PiSP
+
+Il confronto e' stato eseguito sul Raspberry Pi 5 reale con due package costruiti
+dallo stesso punto di partenza: la variante PiSP corrente e una baseline no-PiSP
+creata rimuovendo soltanto integrazione/injection PiSP, build/link di libpisp e
+relativi asset/gate. Restano identici il commit Sunshine, Release,
+`-O3 -mcpu=cortex-a76 -mtune=cortex-a76`, IPO/LTO, cattura, libx264, percorso
+audio upstream, packaging e configurazione di streaming.
+
+Scenario misurato:
+
+- Raspberry Pi 5 / Batocera;
+- Flycast con rendering sorgente 640x480;
+- contenuto scalato a 960x720 e centrato in output 1280x720;
+- encoder software libx264;
+- stessa scena, risoluzione Moonlight, FPS e bitrate per entrambi i rami;
+- 3 run da 120 secondi per configurazione, campionamento una volta al secondo.
+
+| Run | no-PiSP: CPU Sunshine media | PiSP: CPU Sunshine media |
+|---|---:|---:|
+| 1 | 62.87% | 54.11% |
+| 2 | 70.48% | 52.67% |
+| 3 | 65.22% | 50.08% |
+| **Media** | **66.19%** | **52.29%** |
+
+Nel test end-to-end la CPU media del processo Sunshine e' quindi scesa da
+**66.19% a 52.29%**: **-13.90 punti percentuali**, pari a circa **-21.0% rispetto
+alla baseline no-PiSP**. Tutti e tre i run PiSP (`50.08-54.11%`) sono rimasti al
+di sotto di tutti e tre i run no-PiSP (`62.87-70.48%`).
+
+Come controlli secondari, la CPU media dell'intero sistema e' passata da circa
+44.80% a 41.95%; la temperatura media dei run e' rimasta sostanzialmente
+invariata (circa 67.3 C no-PiSP contro 66.9 C PiSP). L'RSS ha mostrato una
+riduzione media, ma varia sensibilmente anche fra run della stessa build e non
+viene quindi attribuito direttamente a PiSP.
+
+Questo e' un benchmark **end-to-end del processo Sunshine**, non un
+microbenchmark isolato del converter. Il risultato dimostra un vantaggio CPU
+ripetibile nello scenario misurato, ma non implica automaticamente una riduzione
+del 21% per ogni gioco, risoluzione, encoder o configurazione.
 
 ## Attribuzione
 
@@ -174,17 +220,27 @@ modo diagnostico se non lo diventa entro il timeout.
 
 `ldd` sul runner Ubuntu descrive il runner Ubuntu, non Batocera. Gli audit CI
 verificano architettura, `DT_NEEDED`, blacklist, bundle, presenza e sintassi del
-servizio Batocera; la compatibilita' finale deve essere provata separatamente
+servizio Batocera; la compatibilita' finale resta una proprieta' da verificare
 sul target reale.
 
-## Validazione runtime ancora necessaria
+## Validazione runtime eseguita
 
-La CI valida sorgenti, build, ELF, dipendenze e artifact, ma non equivale a un
-test Batocera. Prima di promuovere qualsiasi release devono essere riprovati sul
-Raspberry Pi 5 reale: accesso al device PiSP, conversione e fallback, qualita' e
-range video, stabilita', latenza/prestazioni, audio PulseAudio upstream,
-streaming Flycast e avvio persistente dopo reboot. Fino ad allora il risultato
-resta **experimental/test build**.
+Sul Raspberry Pi 5/Batocera usato per i test sono stati verificati sia il
+percorso senza padding sia quello con padding. Con sorgente 1920x1080 e output
+1280x720 PiSP viene selezionato con offset `0x0`. Con Flycast a 640x480 Sunshine
+calcola contenuto 960x720, output finale 1280x720 e offset orizzontale 160 pixel;
+il log runtime conferma l'attivazione del converter PiSP anche in questo caso.
+
+Nel test 640x480 il PiSP ha restituito stride di output 1024 per un contenuto
+luma largo 960 pixel, esercitando quindi realmente il percorso di copia
+stride-aware introdotto per il padding. Nei log del test non sono comparsi i
+marker di `PISP_CONVERTER runtime failure`, `frame conversion exception` o
+fallback runtime dopo l'attivazione del percorso misurato.
+
+La validazione comprende inoltre streaming Flycast, encoder libx264, audio
+PulseAudio upstream e benchmark controllato riportato sopra. Restano fuori dal
+campo di questa prova tutte le combinazioni di giochi, risoluzioni, encoder,
+display e versioni Batocera non esplicitamente testate.
 
 ## Rollback
 
