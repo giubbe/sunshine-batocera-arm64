@@ -1,12 +1,11 @@
 ---
-name: Build Sunshine for Batocera ARM64
+name: Build Sunshine no-PiSP baseline for Batocera ARM64
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - main
-      - final-kms-audio-tuning
+      - benchmark/no-pisp-baseline
   pull_request:
     branches:
       - main
@@ -15,12 +14,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: sunshine-batocera-arm64-${{ github.ref }}
+  group: sunshine-batocera-arm64-no-pisp-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Native ARM64 build and audit
+    name: Native ARM64 no-PiSP baseline build and audit
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
 
@@ -37,7 +36,7 @@ jobs:
           fetch-tags: true
           submodules: recursive
 
-      - name: Verify source identity, runner, and upstream audio path
+      - name: Verify source identity, runner, upstream audio path, and no PiSP injection
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -54,15 +53,10 @@ jobs:
             echo 'ERROR: video diagnostic telemetry unexpectedly present' >&2
             exit 1
           fi
-
-      - name: Inject Raspberry Pi 5 PiSP converter
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 tools/inject-pisp-software-converter.py
-          grep -nF 'PISP_CONVERTER enabled' source/src/video.cpp
-          git -C source diff --check
-          git -C source diff -- src/video.cpp
+          if grep -RFn 'PISP_CONVERTER' source/src; then
+            echo 'ERROR: PiSP converter unexpectedly present in baseline source' >&2
+            exit 1
+          fi
 
       - name: Install build dependencies
         shell: bash
@@ -91,7 +85,6 @@ jobs:
             libudev-dev \
             libva-dev \
             libwayland-dev \
-            meson \
             ninja-build \
             nodejs \
             npm \
@@ -102,43 +95,8 @@ jobs:
             systemd-dev \
             udev
 
-      - name: Build pinned libpisp 1.7.0
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          git init libpisp
-          git -C libpisp remote add origin https://github.com/raspberrypi/libpisp.git
-          git -C libpisp fetch --depth=1 origin f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
-          git -C libpisp checkout --detach FETCH_HEAD
-          test "$(git -C libpisp rev-parse HEAD)" = f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
-          meson setup libpisp/build libpisp \
-            --prefix="$GITHUB_WORKSPACE/pisp-prefix" \
-            --wrap-mode=forcefallback \
-            -Dbuildtype=release \
-            -Ddefault_library=static \
-            -Dc_args='-O3 -mcpu=cortex-a76 -mtune=cortex-a76' \
-            -Dcpp_args='-O3 -mcpu=cortex-a76 -mtune=cortex-a76' \
-            -Dlogging=disabled \
-            -Dexamples=false \
-            -Dgstreamer=disabled
-          meson compile -C libpisp/build --verbose 2>&1 | tee libpisp-build.log
-          awk '
-            / -c / && / -o / && /\.o([[:space:]]|$)/ &&
-            /-O3([[:space:]]|$)/ &&
-            /-mcpu=cortex-a76([[:space:]]|$)/ &&
-            /-mtune=cortex-a76([[:space:]]|$)/ { found=1 }
-            END { exit !found }
-          ' libpisp-build.log
-          meson install -C libpisp/build
-          test -f pisp-prefix/lib/aarch64-linux-gnu/libpisp.a || test -f pisp-prefix/lib/libpisp.a
-          find pisp-prefix -maxdepth 4 -type f -print
-
       - name: Build, package, and audit
         shell: bash
-        env:
-          CMAKE_PREFIX_PATH: ${{ github.workspace }}/pisp-prefix
-          PKG_CONFIG_PATH: ${{ github.workspace }}/pisp-prefix/lib/aarch64-linux-gnu/pkgconfig:${{ github.workspace }}/pisp-prefix/lib/pkgconfig
-          PISP_PREFIX: ${{ github.workspace }}/pisp-prefix
         run: |
           set -Eeuo pipefail
           chmod +x ci/build-package.sh ci/audit-package.sh
@@ -156,13 +114,12 @@ jobs:
             END { exit !found }
           ' build-complete.log
           mv build-complete.log artifacts/build-complete.log
-          mv libpisp-build.log artifacts/libpisp-build.log
 
       - name: Upload package, checksum, logs, and report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: sunshine-batocera-arm64-v2026.516.143833
+          name: sunshine-batocera-arm64-no-pisp-v2026.516.143833
           path: artifacts/
           if-no-files-found: warn
           retention-days: 30
