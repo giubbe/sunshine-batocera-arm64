@@ -24,6 +24,7 @@ echo "SOURCE_TAG=${SOURCE_TAG}"
 echo "SOURCE_COMMIT=${SOURCE_COMMIT}"
 echo "RUNNER_ARCH=$(uname -m)"
 echo "INSTALL_PREFIX=/userdata/system/add-ons/sunshine"
+echo "BENCHMARK_BASELINE=NO_PISP"
 
 echo "== Packaged launcher/service syntax =="
 test -x "${WRAPPER}"
@@ -84,10 +85,7 @@ if readelf -d "${SUNSHINE}" | grep -Eiq "${FORBIDDEN_REGEX}"; then
   exit 1
 fi
 
-# This build deliberately keeps the pinned Sunshine upstream PulseAudio capture
-# implementation. Upstream uses pa_simple_read(), so both libpulse and
-# libpulse-simple are expected dependencies. The experimental pa_stream callback
-# used during diagnostics is not applied to this build.
+# Keep the exact upstream PulseAudio capture path used by the PiSP build.
 if ! readelf -d "${SUNSHINE}" | grep -Fq '[libpulse.so.0]'; then
   echo "ERROR: expected libpulse.so.0 dependency not found" >&2
   exit 1
@@ -104,15 +102,21 @@ if strings "${SUNSHINE}" | grep -Fq 'PIPELINE_TELEMETRY'; then
   echo "ERROR: diagnostic video telemetry unexpectedly embedded" >&2
   exit 1
 fi
-if ! strings "${SUNSHINE}" | grep -Fq 'PISP_CONVERTER enabled'; then
-  echo "ERROR: PiSP converter marker not embedded" >&2
+
+# Benchmark-control gate: the baseline must contain no PiSP integration at all.
+if strings "${SUNSHINE}" | grep -Fq 'PISP_CONVERTER'; then
+  echo "ERROR: PiSP converter marker unexpectedly embedded in baseline" >&2
   exit 1
 fi
 if readelf -d "${SUNSHINE}" | grep -Fqi '[libpisp'; then
-  echo "ERROR: libpisp must be linked statically, not recorded in DT_NEEDED" >&2
+  echo "ERROR: libpisp dependency unexpectedly present in baseline" >&2
   exit 1
 fi
-echo "PISP_LINKAGE=STATIC"
+if find "${PACKAGE_DIR}" -path '*/libpisp/*' -o -name 'libpisp*' | grep -q .; then
+  echo "ERROR: PiSP runtime/build artifact unexpectedly packaged in baseline" >&2
+  exit 1
+fi
+echo "PISP_INTEGRATION=ABSENT"
 
 echo "== Bundled runtime libraries =="
 find "${PACKAGE_DIR}/lib" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort
