@@ -4,7 +4,7 @@ set -Eeuo pipefail
 readonly SOURCE_COMMIT="14ffa6fdaa53f7b51512be2b3d24f3939695403c"
 readonly SOURCE_TAG="v2026.516.143833"
 readonly INSTALL_PREFIX="/userdata/system/add-ons/sunshine"
-readonly PACKAGE_NAME="sunshine-batocera-arm64"
+readonly PACKAGE_NAME="sunshine-batocera-arm64-no-pisp"
 readonly PI5_CPU_FLAGS="-O3 -mcpu=cortex-a76 -mtune=cortex-a76"
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,7 +14,6 @@ readonly BUILD_DIR="${REPO_ROOT}/build"
 readonly STAGE_DIR="${REPO_ROOT}/stage"
 readonly ARTIFACTS_DIR="${REPO_ROOT}/artifacts"
 readonly PACKAGE_DIR="${STAGE_DIR}/${PACKAGE_NAME}"
-readonly PISP_PREFIX="${PISP_PREFIX:-${REPO_ROOT}/pisp-prefix}"
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "ERROR: native aarch64 runner required; found $(uname -m)" >&2
@@ -27,26 +26,7 @@ if [[ "${actual_commit}" != "${SOURCE_COMMIT}" ]]; then
   exit 1
 fi
 
-pisp_pc="$(find "${PISP_PREFIX}" -type f -name 'libpisp.pc' -print -quit)"
-if [[ -z "${pisp_pc}" ]]; then
-  echo "ERROR: pinned libpisp installation not found under ${PISP_PREFIX}" >&2
-  exit 1
-fi
-pisp_pkgdir="$(dirname -- "${pisp_pc}")"
-export PKG_CONFIG_PATH="${pisp_pkgdir}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
-pisp_cflags="$(pkg-config --cflags libpisp)"
-pisp_libs="$(pkg-config --libs --static libpisp)"
-pisp_archive="$(find "${PISP_PREFIX}" -type f -name 'libpisp.a' -print -quit)"
-if [[ -z "${pisp_archive}" || ! -f "${pisp_archive}" ]]; then
-  echo "ERROR: static libpisp archive not found under ${PISP_PREFIX}" >&2
-  exit 1
-fi
-printf '%s\n' \
-  "PISP_PREFIX=${PISP_PREFIX}" \
-  "PISP_CFLAGS=${pisp_cflags}" \
-  "PISP_LIBS=${pisp_libs}" \
-  "PISP_ARCHIVE=${pisp_archive}" \
-  "PI5_CPU_FLAGS=${PI5_CPU_FLAGS}"
+printf '%s\n' "PI5_CPU_FLAGS=${PI5_CPU_FLAGS}" "BASELINE_CONVERTER=libswscale"
 
 for generated_dir in "${BUILD_DIR}" "${STAGE_DIR}" "${ARTIFACTS_DIR}"; do
   if [[ -e "${generated_dir}" ]]; then
@@ -64,9 +44,7 @@ cmake_args=(
   -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
   -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}"
   -DCMAKE_C_FLAGS_RELEASE="${PI5_CPU_FLAGS} -DNDEBUG"
-  -DCMAKE_CXX_FLAGS="${pisp_cflags} -I${PISP_PREFIX}/include"
   -DCMAKE_CXX_FLAGS_RELEASE="${PI5_CPU_FLAGS} -DNDEBUG"
-  -DEXTRA_LIBS="${pisp_archive};-pthread;dl"
   -DSUNSHINE_ASSETS_DIR=share/sunshine
   -DSUNSHINE_EXECUTABLE_PATH="${INSTALL_PREFIX}/bin/sunshine"
   -DBUILD_DOCS=OFF
@@ -102,12 +80,6 @@ fi
 
 cp -a -- "${install_root}/bin/sunshine" "${PACKAGE_DIR}/bin/sunshine"
 cp -a -- "${install_root}/share" "${PACKAGE_DIR}/share"
-
-# PiSP is linked statically. Ship the exact backend defaults used by libpisp
-# so runtime behaviour is independent of the Batocera root filesystem.
-install -Dm0644 \
-  "${REPO_ROOT}/libpisp/src/libpisp/backend/backend_default_config.json" \
-  "${PACKAGE_DIR}/share/libpisp/backend/backend_default_config.json"
 
 # Batocera was verified to miss Ubuntu's ICU 74 ABI. Bundle only the ICU 74
 # closure actually referenced by Sunshine; never manufacture cross-ABI links.
@@ -145,7 +117,6 @@ SUNSHINE_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
 export XDG_RUNTIME_DIR=/var/run
 export WAYLAND_DISPLAY=wayland-0
 export LD_LIBRARY_PATH="${SUNSHINE_ROOT}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-export LIBPISP_BE_CONFIG_FILE="${SUNSHINE_ROOT}/share/libpisp/backend/backend_default_config.json"
 export SUNSHINE_ASSETS="${SUNSHINE_ROOT}/share/sunshine"
 export SUNSHINE_WEBROOT="${SUNSHINE_ROOT}/share/sunshine/web"
 export SUNSHINE_APP_ICONS="${SUNSHINE_ROOT}/share/sunshine"
@@ -161,27 +132,28 @@ install -Dm0755 \
   "${PACKAGE_DIR}/bin/install-batocera-service"
 
 cat > "${PACKAGE_DIR}/README.txt" <<EOF
-Sunshine ${SOURCE_TAG} experimental PiSP test build for Batocera 43apu.1 / Raspberry Pi 5 aarch64
+Sunshine ${SOURCE_TAG} reproducible no-PiSP benchmark baseline for Batocera 43apu.1 / Raspberry Pi 5 aarch64
 Source commit: ${SOURCE_COMMIT}
 Install path: ${INSTALL_PREFIX}
 Manual start: ${INSTALL_PREFIX}/bin/sunshine-start
 Install Batocera service: ${INSTALL_PREFIX}/bin/install-batocera-service
-Experimental converter: Raspberry Pi PiSP (RGB888 -> YUV420P), with libswscale fallback
-libpisp commit: f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9
+Converter: unmodified Sunshine upstream libswscale software path
 Build optimization: Release + LTO/IPO + Cortex-A76 CPU tuning
 Audio capture: unmodified Sunshine upstream pa_simple path
 
-This is an experimental test build, not a claim of superiority over BUA or
-upstream Sunshine. The PiSP conversion path is the principal experiment.
+This build exists only as the controlled A/B baseline for the experimental
+PiSP build. It deliberately keeps the same pinned Sunshine source, compiler
+optimization profile, KMS/Wayland/VAAPI feature switches, audio path, service
+integration, ICU compatibility bundle and packaging structure while omitting
+only the PiSP source injection, libpisp build/linkage and PiSP runtime assets.
 
 The packaged Batocera user service waits for Wayland and for all dynamic
 Sunshine dependencies to resolve before starting. It defaults to
 /userdata/system/.config/sunshine/sunshine.conf and can be overridden through
 /userdata/system/configs/sunshine-service.conf.
 
-Only the ICU 74 closure required by Sunshine is bundled. libpisp is linked
-statically and its backend_default_config.json is bundled in share/libpisp.
-Other dynamic libraries must be provided by the Batocera target.
+Only the ICU 74 closure required by Sunshine is bundled. Other dynamic
+libraries must be provided by the Batocera target.
 EOF
 
 (
