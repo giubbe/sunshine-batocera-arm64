@@ -39,6 +39,9 @@ grep -Fq 'batocera-services enable sunshine' "${SERVICE_INSTALLER}"
 echo "== Effective CMake profile =="
 grep -E '^(BUILD_DOCS|BUILD_TESTS|BUILD_WERROR|CMAKE_BUILD_TYPE|CMAKE_INSTALL_PREFIX|CMAKE_INTERPROCEDURAL_OPTIMIZATION|SUNSHINE_ASSETS_DIR|SUNSHINE_EXECUTABLE_PATH|SUNSHINE_ENABLE_(TRAY|CUDA|VULKAN|X11|KWIN|PORTAL|WAYLAND|DRM|VAAPI)):' \
   "${BUILD_DIR}/CMakeCache.txt" | LC_ALL=C sort
+grep -Fqx 'CMAKE_BUILD_TYPE:STRING=Release' "${BUILD_DIR}/CMakeCache.txt"
+grep -Fqx 'CMAKE_INTERPROCEDURAL_OPTIMIZATION:UNINITIALIZED=ON' "${BUILD_DIR}/CMakeCache.txt"
+grep -F 'CMAKE_CXX_FLAGS_RELEASE:STRING=' "${BUILD_DIR}/CMakeCache.txt" | grep -F -- '-O3 -mcpu=cortex-a76 -mtune=cortex-a76'
 
 echo "== Architecture =="
 file "${SUNSHINE}"
@@ -101,6 +104,15 @@ if strings "${SUNSHINE}" | grep -Fq 'PIPELINE_TELEMETRY'; then
   echo "ERROR: diagnostic video telemetry unexpectedly embedded" >&2
   exit 1
 fi
+if ! strings "${SUNSHINE}" | grep -Fq 'PISP_CONVERTER enabled'; then
+  echo "ERROR: PiSP converter marker not embedded" >&2
+  exit 1
+fi
+if readelf -d "${SUNSHINE}" | grep -Fqi '[libpisp'; then
+  echo "ERROR: libpisp must be linked statically, not recorded in DT_NEEDED" >&2
+  exit 1
+fi
+echo "PISP_LINKAGE=STATIC"
 
 echo "== Bundled runtime libraries =="
 find "${PACKAGE_DIR}/lib" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort

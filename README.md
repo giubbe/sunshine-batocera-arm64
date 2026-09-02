@@ -1,147 +1,138 @@
 # Sunshine ARM64 per Batocera 43 / Raspberry Pi 5
 
-> [!WARNING]
-> **Progetto in corso di sviluppo.** Questo repository viene sviluppato e testato
-> iterativamente con l'assistenza di **ChatGPT**. Non e' un fork di Sunshine:
-> e' un harness riproducibile che compila una revisione upstream fissata e applica
-> solo gli adattamenti documentati per il target Batocera ARM64.
->
-> La configurazione descritta qui sotto e' stata provata su Raspberry Pi 5 con
-> Batocera `43apu.1`. Revisioni diverse di Batocera o Sunshine richiedono una
-> nuova validazione runtime.
+> [!NOTE]
+> **Experimental PiSP build validata sul Raspberry Pi 5 reale.** La build ARM64
+> passa i gate CI e il percorso PiSP e' stato verificato runtime sul target
+> Batocera usato per i test, inclusa la conversione con padding 640x480 ->
+> 960x720 -> 1280x720. I risultati riportati qui descrivono il target e lo
+> scenario misurati; non costituiscono una garanzia universale di prestazioni o
+> compatibilita' su altre configurazioni.
 
-Questo repository compila i sorgenti ufficiali Sunshine in un checkout separato,
-fissato a:
+Questo harness costruisce Sunshine per Raspberry Pi 5 / BCM2712 / Cortex-A76,
+Batocera `43apu.1` e AArch64, con installazione in
+`/userdata/system/add-ons/sunshine`.
 
-- tag: `v2026.516.143833`
-- commit: `14ffa6fdaa53f7b51512be2b3d24f3939695403c`
-- destinazione: `/userdata/system/add-ons/sunshine`
+Identita' fissate e verificate dalla CI:
 
-Il workflow usa un runner GitHub Actions ARM64 nativo `ubuntu-24.04-arm`.
-Non usa Flatpak, AppImage, FUSE, container runtime o binari Sunshine di versioni
-precedenti.
+- Sunshine tag `v2026.516.143833`, commit `14ffa6fdaa53f7b51512be2b3d24f3939695403c`;
+- libpisp 1.7.0, commit `f8a5eb2af4c5dea76442785ef42b2fb1aa9e62f9`.
 
-## Perche' questa build invece della BUA
+Il tratto distintivo e' il converter sperimentale
+`BGR0 -> RGB888 (repack NEON) -> PiSP -> YUV420P -> libx264`. Matrice JPEG
+(full range), scaler e formati restano quelli gia' validati; se inizializzazione
+o conversione PiSP falliscono, Sunshine passa automaticamente a libswscale.
+Non vengono usati i formati RGB32 PiSP non supportati dal backend provato.
 
-La variante ARM64 di Batocera Unofficial Add-ons (BUA) installa
-`Sunshine-aarch64.AppImage` e crea una configurazione con:
+La compilazione Sunshine usa Release, `-O3 -mcpu=cortex-a76
+-mtune=cortex-a76` e CMake IPO/LTO. libpisp usa gli stessi flag CPU e di
+ottimizzazione, ma non LTO: evitare LTO attraverso Meson/CMake mantiene semplice
+e riproducibile il linking statico. Non sono usati `-ffast-math`, `-Ofast` o
+assunzioni di undefined behaviour. Queste scelte, da sole, non dimostrano un
+guadagno prestazionale; il benchmark runtime controllato e' riportato piu'
+avanti.
 
-```ini
-encoder = software
-sw_preset = ultrafast
-```
+## Differenze rispetto alla variante BUA ARM64
 
-Riferimento BUA:
-https://github.com/batocera-unofficial-addons/batocera-unofficial-addons/blob/main/sunshine/sunshine-arm64.sh
+> **Questa build non vuole sostituire BUA e non e' dichiarata migliore di BUA.
+> E' un esperimento separato finalizzato a verificare l'uso del PiSP del
+> Raspberry Pi 5 nella pipeline software di Sunshine.**
 
-Questa build adotta invece un approccio differente:
+| Aspetto | BUA ARM64 corrente | Questa build sperimentale |
+|---|---|---|
+| Sunshine | `v2025.924.154138-BUA-1-g0f5f4e27`, verificato estraendo l'AppImage ARM64 | `v2026.516.143833`, commit fissato `14ffa6fdaa53f7b51512be2b3d24f3939695403c` |
+| Distribuzione | `Sunshine-aarch64.AppImage`, tramite installer BUA | binario/package Batocera dedicato |
+| Configurazione pubblicamente verificabile | `encoder = software`, `sw_preset = ultrafast` | profilo esplicito e auditato in questo repository |
+| Cattura/build | opzioni interne non attribuite: lo script di build dell'AppImage non e' pubblicato nel materiale verificato | KMS/DRM abilitato nella compilazione |
+| Conversione | nessuna caratteristica interna ulteriore attribuita | libpisp 1.7.0 statica, converter PiSP sperimentale e fallback libswscale |
+| CPU | non attribuita dal materiale pubblico | Release/O3, Cortex-A76, IPO/LTO per Sunshine |
 
-- **Supporto KMS/DRM:** la documentazione ufficiale di Sunshine dichiara che
-  l'AppImage non supporta la cattura KMS. Questa build viene compilata con
-  `SUNSHINE_ENABLE_DRM=ON`; Sunshine definisce questa opzione come supporto alla
-  cattura KMS quando disponibile.
+Installer BUA pubblico: <https://github.com/batocera-unofficial-addons/batocera-unofficial-addons/blob/main/sunshine/sunshine-arm64.sh>.
+Una versione Sunshine piu' nuova non implica automaticamente prestazioni o
+stabilita' migliori.
 
-  Documentazione Sunshine:
-  https://docs.lizardbyte.dev/projects/sunshine/master/md_docs_2getting__started.html
+## Audio upstream e gate passivi
 
-  Opzioni di build upstream:
-  https://github.com/LizardByte/Sunshine/blob/master/cmake/prep/options.cmake
+L'audio coincide con il sorgente Sunshine fissato: `pa_simple_new()` e
+`pa_simple_read()`. Non viene applicata alcuna cattura sperimentale `pa_stream`
+callback/deque, non viene inserito un decoder Opus diagnostico e non esiste
+alcuna scrittura `audio-preopus.f32le`/`audio-postopus.f32le`.
 
-- **Sorgente fissato e build ARM64 nativa:** il workflow effettua il checkout
-  del commit Sunshine `14ffa6fdaa53f7b51512be2b3d24f3939695403c`, verifica
-  che il checkout corrisponda esattamente a quel commit e richiede un runner
-  `aarch64`. La build viene eseguita su GitHub Actions con `ubuntu-24.04-arm`.
+La CI conserva soltanto gate passivi che rifiutano un binario contenente
+`AUDIO_PROBE` o `PIPELINE_TELEMETRY`; questi controlli non aggiungono telemetria
+runtime. Gli injector e le patch diagnostiche non utilizzati sono stati rimossi.
 
-  Workflow:
-  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/.github/workflows/build.yml
+## Configurazione osservata nel test Dreamcast/Flycast
 
-- **Installazione senza AppImage:** l'artifact prodotto contiene direttamente
-  il binario Sunshine e gli asset destinati a
-  `/userdata/system/add-ons/sunshine`; l'avvio non richiede quindi l'AppImage
-  utilizzata dall'installer BUA.
-
-  Script di build:
-  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/ci/build-package.sh
-
-- **Bundle ICU esplicito:** lo script di packaging individua tramite `DT_NEEDED`
-  le librerie ICU 74 richieste dal binario e include nel bundle esclusivamente
-  la relativa closure `libicuuc`, `libicudata` e `libicui18n` quando necessaria.
-  Lo script non crea symlink per sostituire versioni ABI differenti.
-
-  Script di build:
-  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/ci/build-package.sh
-
-- **Controlli CI:** prima della creazione dell'artifact vengono verificati
-  l'architettura AArch64, l'identita' del sorgente e l'applicazione della patch
-  audio; lo script di packaging esegue inoltre l'audit previsto dal progetto
-  prima di creare il tarball.
-
-  Workflow:
-  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/.github/workflows/build.yml
-
-- **Avvio differito sul target:** il pacchetto include un servizio Batocera
-  progettato per attendere la disponibilita' del socket Wayland e la
-  risoluzione delle dipendenze dinamiche prima di avviare Sunshine.
-
-  Script di build:
-  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/ci/build-package.sh
-
-- **Patch della cattura audio Linux:** prima della compilazione il workflow
-  applica `0001-linux-audio-pa-stream-callback.patch` e verifica che nel
-  sorgente risultante siano presenti `pa_stream_connect_record()` e
-  `pa_stream_set_read_callback()` e che il precedente percorso di cattura
-  basato su `pa_simple_read()` non sia piu' presente.
-
-  Workflow:
-  https://github.com/giubbe/sunshine-batocera-arm64/blob/main/.github/workflows/build.yml
-
-Queste sono differenze tecniche verificabili tra i due metodi di distribuzione.
-Non implicano, da sole, che questa build sia generalmente piu' veloce, piu'
-stabile o migliore della variante BUA. Le prestazioni e il comportamento
-runtime devono essere verificati sul target reale.
-
-## Configurazione consigliata sul Raspberry Pi 5
-
-Per il target validato si consiglia di aggiungere al file `sunshine.conf`:
-
-```ini
-capture = kms
-encoder = software
-sw_preset = ultrafast
-```
-
-KMS evita il percorso `zwlr-screencopy` usato dalla cattura Wayland e lascia
-Sunshine sul percorso DRM/KMS disponibile in questa build.
-
-### Giochi o emulatori troppo pesanti
-
-Se un gioco o un emulatore presenta audio che gracchia, rallentamenti o video
-irregolare, ridurre la **risoluzione reale del solo gioco/emulatore** resta una
-regolazione utile da provare prima di abbassare l'intera interfaccia Batocera.
-Nei test Dreamcast/Flycast, portare il gioco da 1080p a 720p ha inizialmente
-eliminato il disturbo mantenendo EmulationStation/Batocera a 1080p.
-
-Il comportamento pero' **non e' risultato stabile dopo reboot**: con configurazione
-ancora verificata come `capture = kms`, `encoder = software` e gioco realmente a
-`1280x720`, il gracchiare e' ricomparso. Per questo motivo la riduzione per-gioco
-va considerata al momento un **workaround sperimentale**, non una soluzione
-validata o garantita.
-
-Il test resta comunque diagnostico e potenzialmente utile: chiedere soltanto a
-Moonlight una risoluzione piu' bassa non riduce necessariamente la risoluzione
-del framebuffer sorgente catturato da Sunshine; impostare invece il gioco o
-l'emulatore a una risoluzione inferiore riduce realmente il framebuffer prodotto
-dal target.
-
-Configurazione attualmente consigliata per continuare i test:
+La chiave Batocera 43.1 e' `flycast_render_resolution`; il prompt UI corretto e'
+**RENDER RESOLUTION**. Il valore `480` corrisponde a `1x (640x480)`:
 
 ```text
-Batocera / EmulationStation: risoluzione preferita (es. 1920x1080)
-Gioco / emulatore critico:   provare 1280x720 o inferiore
-Sunshine capture:            KMS
-Sunshine encoder:            software
-Audio:                       attivo
+Batocera -> Dreamcast/Flycast -> Advanced Game Options
+RENDER RESOLUTION = 1x (640x480)
+
+Run-Ahead Frames                    = None
+Use Second Instance for Run-Ahead   = On
+Automatic Frame Delay               = Off
+Variable Refresh Rate               = Off
 ```
+
+Questa e' la configurazione empiricamente risultata funzionante nel test sul
+target specifico, non una raccomandazione universale Batocera. Con
+`Run-Ahead Frames = None`, la seconda istanza non dovrebbe avere un effetto
+operativo rilevante.
+
+**VIDEO MODE** controlla la modalita'/risoluzione di uscita del display e non
+garantisce la risoluzione di rendering interna di Flycast. Il precedente test
+interpretato come rendering a 720p aveva modificato l'opzione sbagliata: il
+risultato utile e' stato osservato con la vera RENDER RESOLUTION a 640x480.
+
+## Benchmark controllato PiSP vs no-PiSP
+
+Il confronto e' stato eseguito sul Raspberry Pi 5 reale con due package costruiti
+dallo stesso punto di partenza: la variante PiSP corrente e una baseline no-PiSP
+creata rimuovendo soltanto integrazione/injection PiSP, build/link di libpisp e
+relativi asset/gate. Restano identici il commit Sunshine, Release,
+`-O3 -mcpu=cortex-a76 -mtune=cortex-a76`, IPO/LTO, cattura, libx264, percorso
+audio upstream, packaging e configurazione di streaming.
+
+Scenario misurato:
+
+- Raspberry Pi 5 / Batocera;
+- Flycast con rendering sorgente 640x480;
+- contenuto scalato a 960x720 e centrato in output 1280x720;
+- encoder software libx264;
+- stessa scena, risoluzione Moonlight, FPS e bitrate per entrambi i rami;
+- 3 run da 120 secondi per configurazione, campionamento una volta al secondo.
+
+| Run | no-PiSP: CPU Sunshine media | PiSP: CPU Sunshine media |
+|---|---:|---:|
+| 1 | 62.87% | 54.11% |
+| 2 | 70.48% | 52.67% |
+| 3 | 65.22% | 50.08% |
+| **Media** | **66.19%** | **52.29%** |
+
+Nel test end-to-end la CPU media del processo Sunshine e' quindi scesa da
+**66.19% a 52.29%**: **-13.90 punti percentuali**, pari a circa **-21.0% rispetto
+alla baseline no-PiSP**. Tutti e tre i run PiSP (`50.08-54.11%`) sono rimasti al
+di sotto di tutti e tre i run no-PiSP (`62.87-70.48%`).
+
+Come controlli secondari, la CPU media dell'intero sistema e' passata da circa
+44.80% a 41.95%; la temperatura media dei run e' rimasta sostanzialmente
+invariata (circa 67.3 C no-PiSP contro 66.9 C PiSP). L'RSS ha mostrato una
+riduzione media, ma varia sensibilmente anche fra run della stessa build e non
+viene quindi attribuito direttamente a PiSP.
+
+Questo e' un benchmark **end-to-end del processo Sunshine**, non un
+microbenchmark isolato del converter. Il risultato dimostra un vantaggio CPU
+ripetibile nello scenario misurato, ma non implica automaticamente una riduzione
+del 21% per ogni gioco, risoluzione, encoder o configurazione.
+
+## Attribuzione
+
+L'harness di build e l'integrazione sperimentale PiSP sono stati sviluppati con
+ChatGPT (OpenAI), con verifica e test runtime eseguiti dal maintainer sul
+Raspberry Pi 5 reale. Sunshine e libpisp restano opere dei rispettivi progetti
+upstream; questa attribuzione non riguarda i loro sorgenti.
 
 ## Build e artifact
 
@@ -229,44 +220,27 @@ modo diagnostico se non lo diventa entro il timeout.
 
 `ldd` sul runner Ubuntu descrive il runner Ubuntu, non Batocera. Gli audit CI
 verificano architettura, `DT_NEEDED`, blacklist, bundle, presenza e sintassi del
-servizio Batocera; la compatibilita' finale deve essere provata separatamente
+servizio Batocera; la compatibilita' finale resta una proprieta' da verificare
 sul target reale.
 
-## Validazione runtime
+## Validazione runtime eseguita
 
-La famiglia di build e' stata validata su **Raspberry Pi 5** con
-**Batocera 43apu.1** e Sunshine `v2026.516.143833` / commit
-`14ffa6fdaa53f7b51512be2b3d24f3939695403c`.
+Sul Raspberry Pi 5/Batocera usato per i test sono stati verificati sia il
+percorso senza padding sia quello con padding. Con sorgente 1920x1080 e output
+1280x720 PiSP viene selezionato con offset `0x0`. Con Flycast a 640x480 Sunshine
+calcola contenuto 960x720, output finale 1280x720 e offset orizzontale 160 pixel;
+il log runtime conferma l'attivazione del converter PiSP anche in questo caso.
 
-Verifiche eseguite sul target durante lo sviluppo:
+Nel test 640x480 il PiSP ha restituito stride di output 1024 per un contenuto
+luma largo 960 pixel, esercitando quindi realmente il percorso di copia
+stride-aware introdotto per il padding. Nei log del test non sono comparsi i
+marker di `PISP_CONVERTER runtime failure`, `frame conversion exception` o
+fallback runtime dopo l'attivazione del percorso misurato.
 
-- avvio, stop, reboot e servizio persistente Batocera;
-- sessione storica di streaming di circa tre ore senza crash osservati;
-- confronto tra cattura audio `pa_simple`, `pa_stream`, `parec` e `pw-record`;
-- verifica che il percorso asincrono `pa_stream` non corrompa il monitor
-  PipeWire come osservato con il percorso sincrono durante i test iniziali;
-- confronto Wayland/KMS;
-- test con Dreamcast/Flycast a 1080p e 720p;
-- verifica di assenza di throttling (`throttled=0x0`) durante il caso critico;
-- miglioramento iniziale osservato impostando il gioco Dreamcast a 720p, seguito
-  pero' dalla ricomparsa del gracchiare dopo reboot a parita' di risoluzione e
-  backend KMS; la causa residua e' quindi ancora in indagine.
-
-La build finale prodotta dopo modifiche al repository deve comunque superare la
-CI ed essere nuovamente verificata sul target prima di considerare estesa a
-quell'esatto artifact tutta la validazione runtime sopra descritta.
-
-### Warning noto sul target
-
-Sul sistema validato il loader puo' emettere:
-
-```text
-/usr/lib/libcurl.so.4: no version information available
-```
-
-Il warning non ha impedito l'avvio di Sunshine ne' lo streaming nei test. Resta
-una differenza ABI/symbol-versioning del target da considerare se il pacchetto
-viene usato su revisioni Batocera differenti.
+La validazione comprende inoltre streaming Flycast, encoder libx264, audio
+PulseAudio upstream e benchmark controllato riportato sopra. Restano fuori dal
+campo di questa prova tutte le combinazioni di giochi, risoluzioni, encoder,
+display e versioni Batocera non esplicitamente testate.
 
 ## Rollback
 

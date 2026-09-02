@@ -43,7 +43,7 @@ jobs:
           set -Eeuo pipefail
           test "$(uname -m)" = aarch64
           test "$(git -C source rev-parse HEAD)" = 14ffa6fdaa53f7b51512be2b3d24f3939695403c
-          git -C source describe --tags --exact-match HEAD
+          test "$(git -C source describe --tags --exact-match HEAD)" = v2026.516.143833
           git -C source submodule status --recursive
           grep -nF 'pa_simple_read(mic.get()' source/src/platform/linux/audio.cpp
           if grep -RFn 'AUDIO_PROBE' source/src; then
@@ -116,10 +116,19 @@ jobs:
             --wrap-mode=forcefallback \
             -Dbuildtype=release \
             -Ddefault_library=static \
+            -Dc_args='-O3 -mcpu=cortex-a76 -mtune=cortex-a76' \
+            -Dcpp_args='-O3 -mcpu=cortex-a76 -mtune=cortex-a76' \
             -Dlogging=disabled \
             -Dexamples=false \
             -Dgstreamer=disabled
-          meson compile -C libpisp/build
+          meson compile -C libpisp/build --verbose 2>&1 | tee libpisp-build.log
+          awk '
+            / -c / && / -o / && /\.o([[:space:]]|$)/ &&
+            /-O3([[:space:]]|$)/ &&
+            /-mcpu=cortex-a76([[:space:]]|$)/ &&
+            /-mtune=cortex-a76([[:space:]]|$)/ { found=1 }
+            END { exit !found }
+          ' libpisp-build.log
           meson install -C libpisp/build
           test -f pisp-prefix/lib/aarch64-linux-gnu/libpisp.a || test -f pisp-prefix/lib/libpisp.a
           find pisp-prefix -maxdepth 4 -type f -print
@@ -131,18 +140,29 @@ jobs:
           PKG_CONFIG_PATH: ${{ github.workspace }}/pisp-prefix/lib/aarch64-linux-gnu/pkgconfig:${{ github.workspace }}/pisp-prefix/lib/pkgconfig
           PISP_PREFIX: ${{ github.workspace }}/pisp-prefix
         run: |
-          set -o pipefail
+          set -Eeuo pipefail
           chmod +x ci/build-package.sh ci/audit-package.sh
           ci/build-package.sh 2>&1 | tee build-complete.log
+          awk '
+            / -c / && / -o / && /CMakeFiles\/sunshine\.dir\/.*\.o([[:space:]]|$)/ &&
+            /-O3([[:space:]]|$)/ &&
+            /-mcpu=cortex-a76([[:space:]]|$)/ &&
+            /-mtune=cortex-a76([[:space:]]|$)/ { found=1 }
+            END { exit !found }
+          ' build-complete.log
+          awk '
+            !/ -c / && / -o sunshine([[:space:]]|$)/ &&
+            /-flto(=[^[:space:]]+)?([[:space:]]|$)/ { found=1 }
+            END { exit !found }
+          ' build-complete.log
           mv build-complete.log artifacts/build-complete.log
+          mv libpisp-build.log artifacts/libpisp-build.log
 
       - name: Upload package, checksum, logs, and report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: sunshine-batocera-arm64-v2026.516.143833
-          path: |
-            artifacts/
-            build-complete.log
+          path: artifacts/
           if-no-files-found: warn
           retention-days: 30

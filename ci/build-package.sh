@@ -91,7 +91,7 @@ CLONE_URL=https://github.com/LizardByte/Sunshine.git \
 COMMIT="${SOURCE_COMMIT}" \
 TAG="${SOURCE_TAG}" \
   cmake "${cmake_args[@]}"
-cmake --build "${BUILD_DIR}" --parallel "$(nproc)"
+cmake --build "${BUILD_DIR}" --parallel "$(nproc)" --verbose
 
 DESTDIR="${STAGE_DIR}/install-root" cmake --install "${BUILD_DIR}"
 install_root="${STAGE_DIR}/install-root${INSTALL_PREFIX}"
