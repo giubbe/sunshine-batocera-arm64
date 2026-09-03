@@ -8,6 +8,7 @@ on:
       - main
       - final-kms-audio-tuning
       - experimental/audio-priority-cap-sys-nice
+      - experimental/pisp-rgb888-capture
   pull_request:
     branches:
       - main
@@ -64,6 +65,18 @@ jobs:
           grep -nF 'PISP_CONVERTER enabled' source/src/video.cpp
           git -C source diff --check
           git -C source diff -- src/video.cpp
+
+      - name: Inject PiSP RGB888 KMS capture path
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/inject-pisp-rgb888-capture.py
+          grep -nF 'PISP_RGB888_CAPTURE enabled' source/src/platform/linux/kmsgrab.cpp
+          grep -nF 'PISP_RGB888_CAPTURE direct path active' source/src/video.cpp
+          grep -nF 'GL_RGB, GL_UNSIGNED_BYTE' source/src/platform/linux/kmsgrab.cpp
+          grep -nF 'img->pixel_pitch = 3' source/src/platform/linux/kmsgrab.cpp
+          git -C source diff --check
+          git -C source diff -- src/platform/linux/kmsgrab.cpp src/video.cpp
 
       - name: Inject CAP_SYS_NICE thread-priority fallback
         shell: bash
