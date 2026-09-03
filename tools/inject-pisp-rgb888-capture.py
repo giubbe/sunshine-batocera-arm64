@@ -33,6 +33,7 @@ kms_cursor_old = '''          auto pixels_begin = &pixels[(y + cursor_y) * (img.
 
           std::for_each(cursor_begin, cursor_end, [&](uint32_t cursor_pixel) {
             auto colors_in = (uint8_t *) pixels_begin;
+
             auto alpha = (*(uint *) &cursor_pixel) >> 24u;
             if (alpha == 255) {
               *pixels_begin = cursor_pixel;
@@ -71,6 +72,7 @@ kms_cursor_new = '''          if (img.pixel_pitch == 3) {
 
             std::for_each(cursor_begin, cursor_end, [&](uint32_t cursor_pixel) {
               auto colors_in = (uint8_t *) pixels_begin;
+
               auto alpha = (*(uint *) &cursor_pixel) >> 24u;
               if (alpha == 255) {
                 *pixels_begin = cursor_pixel;
