@@ -1,0 +1,106 @@
+name: Publish validated Raspberry Pi 5 baseline
+
+on:
+  push:
+    branches:
+      - release/publish-pi5-pisp-baseline
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: batocera43-pi5-pisp-2026.516.143833-1
+      RELEASE_NAME: Sunshine v2026.516.143833 - Raspberry Pi 5 / Batocera 43 PiSP build
+      TARGET_SHA: 88c31a30f9717ce31ac766f06298d72d6405e8e4
+      SOURCE_RUN_ID: '33779412721'
+      ARTIFACT_NAME: sunshine-batocera-arm64-v2026.516.143833
+      TARBALL: sunshine-batocera-arm64-v2026.516.143833.tar.gz
+      EXPECTED_TAR_SHA256: 98ad22afc861e2591c331693622aa1ccb537cb5b40bbee4b566bfea5db069f05
+    steps:
+      - name: Checkout release helper branch
+        uses: actions/checkout@v4
+
+      - name: Download exact successful main artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir release-assets
+          cd release-assets
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME"
+          test -f "$TARBALL"
+          test -f "$TARBALL.sha256"
+
+      - name: Verify release payload
+        run: |
+          set -Eeuo pipefail
+          cd release-assets
+          printf '%s  %s\n' "$EXPECTED_TAR_SHA256" "$TARBALL" | sha256sum -c -
+          sha256sum -c "$TARBALL.sha256"
+          tar -tzf "$TARBALL" >/dev/null
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cat > release-notes.md <<'EOF'
+          ## Raspberry Pi 5 / Batocera 43 experimental baseline
+
+          This release publishes the last configuration validated on the real Raspberry Pi 5 target with correct graphics, working PiSP conversion and the validated Sunshine audio-thread priority fallback.
+
+          ### Included
+
+          - Sunshine `v2026.516.143833` for AArch64 / Raspberry Pi 5 / Batocera `43apu.1`.
+          - KMS capture using the visually stable upstream `GL_BGRA` readback path.
+          - Experimental PiSP path: `BGR0 -> RGB888 (NEON) -> PiSP -> YUV420P -> libx264`.
+          - Runtime-validated PiSP scaling, including 640x480 -> 960x720 centered in 1280x720 with stride-aware padding.
+          - Validated `CAP_SYS_NICE` fallback: capture/session audio thread reaches nice `-15`, `audio::encode` reaches nice `-10`, and the effective capability is restored afterwards.
+          - Native ARM64 CI build/audit passed on the exact release payload.
+
+          ### Measured PiSP result
+
+          In the documented controlled 640x480 -> 720p streaming test, Sunshine process CPU averaged 66.19% without PiSP and 52.29% with PiSP, about a 21% relative reduction. This is an end-to-end result for that specific test and is not a universal performance claim.
+
+          ### Known limitation
+
+          Audio underruns can still occur under demanding streaming workloads. Controlled local PipeWire-monitor recordings show structured exact-zero gaps before Opus/network/Moonlight. The exact bottleneck remains unresolved.
+
+          A later `GL_RGB`/RGB888 KMS-readback experiment successfully bypassed the NEON repack but produced intermittent black lines, tearing-like corruption and block-wise Batocera GUI transitions. That experiment is **not included** in this release.
+
+          See `PROJECT_STATUS.md` in the repository for measurements, rejected experiments, hardware constraints and contribution directions. Community contributions are welcome.
+
+          ### Installation
+
+          Extract the tarball so that the packaged `sunshine-batocera-arm64` directory becomes:
+
+          ```text
+          /userdata/system/add-ons/sunshine
+          ```
+
+          Then install/enable the included Batocera service with:
+
+          ```sh
+          /userdata/system/add-ons/sunshine/bin/install-batocera-service
+          batocera-services start sunshine
+          ```
+
+          This remains an experimental target-specific build, not an upstream Sunshine release and not a universal Batocera package.
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; refusing to overwrite it."
+            exit 1
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "$RELEASE_NAME" \
+            --notes-file release-notes.md \
+            release-assets/"$TARBALL" \
+            release-assets/"$TARBALL.sha256"
