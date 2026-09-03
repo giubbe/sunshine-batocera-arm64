@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - final-kms-audio-tuning
+      - experimental/audio-priority-cap-sys-nice
   pull_request:
     branches:
       - main
@@ -63,6 +64,16 @@ jobs:
           grep -nF 'PISP_CONVERTER enabled' source/src/video.cpp
           git -C source diff --check
           git -C source diff -- src/video.cpp
+
+      - name: Inject CAP_SYS_NICE thread-priority fallback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/inject-audio-priority-cap-sys-nice.py
+          grep -nF 'CAP_SYS_NICE fallback: temporarily enabled for thread priority' source/src/platform/linux/misc.cpp
+          grep -nF 'setpriority(PRIO_PROCESS, 0, linux_nice)' source/src/platform/linux/misc.cpp
+          git -C source diff --check
+          git -C source diff -- src/platform/linux/misc.cpp
 
       - name: Install build dependencies
         shell: bash
